@@ -1,0 +1,250 @@
+/**
+ * POST /api/admin/pipeline
+ *
+ * Manual admin controls for the full data pipeline.
+ * Allows individual steps or the full daily cycle to be triggered without
+ * waiting for Vercel Cron (useful during development and testing).
+ *
+ * Body: { action: string }
+ *
+ * Actions:
+ *   'refresh_odds'       — fetch fresh odds from The Odds API + update cached_odds
+ *   'run_predictions'    — run the prediction engine (sync cached_odds → prediction_cache)
+ *   'recalculate_edges'  — re-run the sync that scores edges (same as run_predictions pipeline)
+ *   'refresh_slate'      — no-op (slate filter is computed at query time from slateUtils)
+ *   'grade_picks'        — resolve results for pending official picks with final scores
+ *   'full_cycle'         — runs all of the above in sequence
+ *
+ * GET /api/admin/pipeline
+ *   Returns current pipeline status: last run times, pending picks count, etc.
+ */
+
+import { NextRequest, NextResponse } from 'next/server'
+import { getSession } from '@/lib/auth'
+import { supabaseAdmin } from '@/integrations/supabase/server'
+import { refreshOddsCache } from '@/lib/oddsCacheService'
+import { syncOddsToGamesAndPredictions } from '@/lib/oddsSyncService'
+import {
+  resolveOfficialPickResults,
+  updateClosingLines,
+  selectAndInsertOfficialPicks,
+} from '@/lib/officialPicksService'
+import { getTodaySlateGameIds } from '@/lib/slateUtils'
+
+async function verifyAdmin(): Promise<boolean> {
+  const session = await getSession()
+  if (!session?.userId) return false
+  const { data } = await supabaseAdmin
+    .from('users')
+    .select('role')
+    .eq('id', session.userId)
+    .single()
+  return data?.role === 'admin'
+}
+
+// ── Individual action handlers ──────────────────────────────────────────────
+
+async function doRefreshOdds() {
+  const start = Date.now()
+  const hasApiKey = !!process.env.ODDS_API_KEY
+  const result = await refreshOddsCache()
+  return {
+    step: 'refresh_odds',
+    success: result.success,
+    durationMs: Date.now() - start,
+    detail: { ...result, hasApiKey },
+  }
+}
+
+async function doRunPredictions() {
+  const start = Date.now()
+  let result = null
+  try {
+    result = await syncOddsToGamesAndPredictions()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return { step: 'run_predictions', success: false, durationMs: Date.now() - start, error: msg }
+  }
+  return { step: 'run_predictions', success: true, durationMs: Date.now() - start, detail: result }
+}
+
+async function doRecalculateEdges() {
+  // Edge scores are part of the sync pipeline — re-running sync recalculates them
+  const start = Date.now()
+  let result = null
+  try {
+    result = await syncOddsToGamesAndPredictions()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return { step: 'recalculate_edges', success: false, durationMs: Date.now() - start, error: msg }
+  }
+  return { step: 'recalculate_edges', success: true, durationMs: Date.now() - start, detail: result }
+}
+
+async function doRefreshSlate() {
+  // Slate filtering is computed at query time — no DB action needed.
+  // We return the current window so the admin can see what's active.
+  // Uses getTodaySlateGameIds() which applies .lt(end) + JS-filter workaround for nubase.
+  const { gameIds, slateStart, slateEnd, count } = await getTodaySlateGameIds()
+
+  return {
+    step: 'refresh_slate',
+    success: true,
+    durationMs: 0,
+    detail: {
+      slateStart,
+      slateEnd,
+      gamesInSlate: count,
+      gameIds,
+      note: 'Slate filter is applied at query time — no DB changes required.',
+    },
+  }
+}
+
+async function doGradePicks() {
+  const start = Date.now()
+  const closingResult = await updateClosingLines()
+  const gradeResult = await resolveOfficialPickResults()
+
+  // Compute updated win/loss totals
+  const { data: allResolved } = await supabaseAdmin
+    .from('official_picks')
+    .select('result')
+    .in('result', ['win', 'loss', 'push'])
+
+  const wins = (allResolved ?? []).filter((p) => p.result === 'win').length
+  const losses = (allResolved ?? []).filter((p) => p.result === 'loss').length
+  const pushes = (allResolved ?? []).filter((p) => p.result === 'push').length
+
+  return {
+    step: 'grade_picks',
+    success: gradeResult.errors.length === 0,
+    durationMs: Date.now() - start,
+    detail: {
+      closingLinesUpdated: closingResult.updated,
+      picksGraded: gradeResult.resolved,
+      errors: gradeResult.errors,
+      modelStats: { wins, losses, pushes },
+    },
+  }
+}
+
+// ── Route handlers ──────────────────────────────────────────────────────────
+
+export async function POST(req: NextRequest) {
+  if (!(await verifyAdmin())) {
+    return NextResponse.json({ error: 'Forbidden — admin only' }, { status: 403 })
+  }
+
+  let action = 'full_cycle'
+  try {
+    const body = await req.json()
+    action = body.action ?? 'full_cycle'
+  } catch { /* no body = full cycle */ }
+
+  const totalStart = Date.now()
+
+  try {
+    if (action === 'refresh_odds') {
+      const result = await doRefreshOdds()
+      return NextResponse.json({ success: result.success, results: [result], totalDurationMs: Date.now() - totalStart })
+    }
+
+    if (action === 'run_predictions') {
+      const result = await doRunPredictions()
+      return NextResponse.json({ success: result.success, results: [result], totalDurationMs: Date.now() - totalStart })
+    }
+
+    if (action === 'recalculate_edges') {
+      const result = await doRecalculateEdges()
+      return NextResponse.json({ success: result.success, results: [result], totalDurationMs: Date.now() - totalStart })
+    }
+
+    if (action === 'refresh_slate') {
+      const result = await doRefreshSlate()
+      return NextResponse.json({ success: true, results: [result], totalDurationMs: Date.now() - totalStart })
+    }
+
+    if (action === 'grade_picks') {
+      const result = await doGradePicks()
+      return NextResponse.json({ success: result.success, results: [result], totalDurationMs: Date.now() - totalStart })
+    }
+
+    if (action === 'select_picks') {
+      const start = Date.now()
+      const result = await selectAndInsertOfficialPicks()
+      return NextResponse.json({
+        success: result.errors.length === 0,
+        results: [{ step: 'select_picks', ...result, durationMs: Date.now() - start }],
+        totalDurationMs: Date.now() - totalStart,
+      })
+    }
+
+    if (action === 'full_cycle') {
+      // Run all steps in sequence
+      const results = []
+
+      const oddsResult = await doRefreshOdds()
+      results.push(oddsResult)
+
+      const predResult = await doRunPredictions()
+      results.push(predResult)
+
+      const slateResult = await doRefreshSlate()
+      results.push(slateResult)
+
+      const gradeResult = await doGradePicks()
+      results.push(gradeResult)
+
+      const anyFailed = results.some((r) => !r.success)
+      return NextResponse.json({
+        success: !anyFailed,
+        results,
+        totalDurationMs: Date.now() - totalStart,
+      })
+    }
+
+    return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return NextResponse.json({ error: msg }, { status: 500 })
+  }
+}
+
+export async function GET() {
+  if (!(await verifyAdmin())) {
+    return NextResponse.json({ error: 'Forbidden — admin only' }, { status: 403 })
+  }
+
+  // Fetch slate info and other data in parallel.
+  // getTodaySlateGameIds() uses lt-only + JS-filter to work around nubase .gte+.lt bug.
+  // count:exact returns null in nubase, so we fetch rows and use .length instead.
+  const [
+    oddsResult,
+    engineResult,
+    pendingPicksResult,
+    slateInfo,
+    allPicks,
+  ] = await Promise.all([
+    supabaseAdmin.from('cached_odds').select('last_updated').order('last_updated', { ascending: false }).limit(1).single(),
+    supabaseAdmin.from('engine_runs').select('run_at, status').order('run_at', { ascending: false }).limit(1).single(),
+    supabaseAdmin.from('official_picks').select('id').eq('result', 'pending'),
+    getTodaySlateGameIds(),
+    supabaseAdmin.from('official_picks').select('result').in('result', ['win', 'loss', 'push']),
+  ])
+
+  const wins = (allPicks.data ?? []).filter((p) => p.result === 'win').length
+  const losses = (allPicks.data ?? []).filter((p) => p.result === 'loss').length
+  const pushes = (allPicks.data ?? []).filter((p) => p.result === 'push').length
+
+  return NextResponse.json({
+    lastOddsRefresh: oddsResult.data?.last_updated ?? null,
+    lastPredictionRun: engineResult.data?.run_at ?? null,
+    lastEngineStatus: engineResult.data?.status ?? null,
+    slateStart: slateInfo.slateStart,
+    slateEnd: slateInfo.slateEnd,
+    gamesInSlate: slateInfo.count,
+    pendingPicksToGrade: (pendingPicksResult.data ?? []).length,
+    modelStats: { wins, losses, pushes },
+  })
+}
