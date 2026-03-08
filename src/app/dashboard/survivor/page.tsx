@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
   Trophy, Clock, Star, CheckCircle, ChevronRight, Zap, RotateCcw, Shield,
-  ArrowUpDown, ArrowUp, ArrowDown, TrendingUp, BookmarkCheck, Info,
+  ArrowUpDown, ArrowUp, ArrowDown, TrendingUp, BookmarkCheck, Info, FlaskConical,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
@@ -86,6 +86,27 @@ const MOCK_AI_PICKS = [
 ]
 
 // ─── Types ─────────────────────────────────────────────────────────────────
+const NCAA_ROUNDS = [
+  { key: 'round_of_64',    label: 'Round of 64' },
+  { key: 'round_of_32',    label: 'Round of 32' },
+  { key: 'sweet_16',       label: 'Sweet 16' },
+  { key: 'elite_8',        label: 'Elite 8' },
+  { key: 'final_four',     label: 'Final Four' },
+  { key: 'championship',   label: 'Championship' },
+] as const
+
+type RoundKey = typeof NCAA_ROUNDS[number]['key']
+type PicksPerRound = Record<RoundKey, number>
+
+const DEFAULT_PICKS_PER_ROUND: PicksPerRound = {
+  round_of_64:  2,
+  round_of_32:  1,
+  sweet_16:     1,
+  elite_8:      1,
+  final_four:   1,
+  championship: 1,
+}
+
 interface PoolConfig {
   pool_name: string
   pool_size: string
@@ -93,6 +114,7 @@ interface PoolConfig {
   team_reuse: boolean
   late_round_rule: string
   strike_rule: string
+  picks_per_round: PicksPerRound
 }
 
 interface SurvivorPick {
@@ -176,9 +198,19 @@ function BracketPlaceholder() {
 
 // ─── Pool setup form ───────────────────────────────────────────────────────
 function PoolSetupForm({ onSave }: { onSave: (config: PoolConfig) => void }) {
-  const [config, setConfig] = useState<PoolConfig>({ pool_name: 'My Survivor Pool', pool_size: 'small', pick_format: 'one_per_round', team_reuse: false, late_round_rule: 'none', strike_rule: 'one_strike' })
+  const [config, setConfig] = useState<PoolConfig>({
+    pool_name: 'My Survivor Pool',
+    pool_size: 'small',
+    pick_format: 'one_per_round',
+    team_reuse: false,
+    late_round_rule: 'none',
+    strike_rule: 'one_strike',
+    picks_per_round: { ...DEFAULT_PICKS_PER_ROUND },
+  })
   const [saving, setSaving] = useState(false)
   const set = (k: keyof PoolConfig, v: string | boolean) => setConfig((p) => ({ ...p, [k]: v }))
+  const setPicksForRound = (round: RoundKey, count: number) =>
+    setConfig((p) => ({ ...p, picks_per_round: { ...p.picks_per_round, [round]: Math.max(1, Math.min(8, count)) } }))
 
   const handleSave = async () => {
     setSaving(true)
@@ -225,8 +257,62 @@ function PoolSetupForm({ onSave }: { onSave: (config: PoolConfig) => void }) {
       <Sec title="Pick Format">
         <Opt label="One pick per round" desc="Standard format — one team per tournament round" selected={config.pick_format === 'one_per_round'} onClick={() => set('pick_format', 'one_per_round')} />
         <Opt label="One pick per day" desc="Daily selections during tournament play" selected={config.pick_format === 'one_per_day'} onClick={() => set('pick_format', 'one_per_day')} />
-        <Opt label="Multiple picks per round" desc="Select more than one team per round" selected={config.pick_format === 'multiple_per_round'} onClick={() => set('pick_format', 'multiple_per_round')} />
+        <Opt label="Multiple picks per round" desc="Select more than one team per round — configure exact counts per round below" selected={config.pick_format === 'multiple_per_round'} onClick={() => set('pick_format', 'multiple_per_round')} />
       </Sec>
+
+      {/* ── Picks Per Round Configuration (only when multiple_per_round selected) ── */}
+      {config.pick_format === 'multiple_per_round' && (
+        <div className="mb-6 rounded-2xl p-5"
+          style={{ background: 'rgba(0,255,163,0.04)', border: '1px solid rgba(0,255,163,0.2)' }}>
+          <div className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: '#00FFA3' }}>
+            Picks Per Round Configuration
+          </div>
+          <p className="text-xs mb-4" style={{ color: '#6B6B80' }}>
+            Set the number of picks required for each NCAA tournament round. The AI strategy will use these values when generating recommendations.
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {NCAA_ROUNDS.map(({ key, label }) => (
+              <div key={key} className="rounded-xl p-3"
+                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <div className="text-xs font-semibold mb-2" style={{ color: '#A0A0B0' }}>{label}</div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPicksForRound(key, config.picks_per_round[key] - 1)}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center font-black text-base transition-colors hover:bg-white/10"
+                    style={{ background: 'rgba(255,255,255,0.06)', color: '#A0A0B0' }}
+                    disabled={config.picks_per_round[key] <= 1}
+                  >
+                    −
+                  </button>
+                  <span className="flex-1 text-center text-lg font-black" style={{ color: '#E6E6FA' }}>
+                    {config.picks_per_round[key]}
+                  </span>
+                  <button
+                    onClick={() => setPicksForRound(key, config.picks_per_round[key] + 1)}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center font-black text-base transition-colors hover:bg-white/10"
+                    style={{ background: 'rgba(255,255,255,0.06)', color: '#A0A0B0' }}
+                    disabled={config.picks_per_round[key] >= 8}
+                  >
+                    +
+                  </button>
+                </div>
+                <div className="text-center mt-1 text-[10px]" style={{ color: '#4A4A60' }}>
+                  {config.picks_per_round[key] === 1 ? '1 pick' : `${config.picks_per_round[key]} picks`}
+                </div>
+              </div>
+            ))}
+          </div>
+          {/* Summary */}
+          <div className="mt-3 flex flex-wrap gap-2">
+            {NCAA_ROUNDS.map(({ key, label }) => (
+              <span key={key} className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                style={{ background: 'rgba(0,255,163,0.1)', color: '#00FFA3' }}>
+                {label.replace('Round of ', 'R')} × {config.picks_per_round[key]}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
       <Sec title="Team Usage Rule">
         <Opt label="Team can only be used once" desc="Classic survivor — once used, a team is gone" selected={!config.team_reuse} onClick={() => set('team_reuse', false)} />
         <Opt label="Teams can be reused" desc="Same team can be picked in multiple rounds" selected={config.team_reuse} onClick={() => set('team_reuse', true)} />
@@ -247,11 +333,15 @@ function PoolSetupForm({ onSave }: { onSave: (config: PoolConfig) => void }) {
 }
 
 // ─── AI Best Pick card ──────────────────────────────────────────────────────
-function AIPickCard({ pick, isPremium, usedTeams, onPickTeam }: {
+function AIPickCard({ pick, isPremium, usedTeams, onPickTeam, picksNeeded, picksMade }: {
   pick: typeof MOCK_AI_PICKS[0]; isPremium: boolean; usedTeams: string[]; onPickTeam: (t: string) => void
+  picksNeeded?: number; picksMade?: number
 }) {
   const [confirming, setConfirming] = useState(false)
   const alreadyPicked = usedTeams.includes(pick.team)
+  const isMultiPick = picksNeeded !== undefined && picksNeeded > 1
+  const madeCount = picksMade ?? 0
+  const stillNeeded = isMultiPick ? Math.max(0, picksNeeded! - madeCount) : null
 
   return (
     <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(0,255,163,0.18)', boxShadow: '0 0 24px rgba(0,255,163,0.06)' }}>
@@ -261,6 +351,12 @@ function AIPickCard({ pick, isPremium, usedTeams, onPickTeam }: {
           <span className="text-xs font-bold uppercase tracking-wider" style={{ color: '#00FFA3' }}>
             {pick.roundLabel} · AI Best Survivor Pick
           </span>
+          {isMultiPick && (
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+              style={{ background: stillNeeded === 0 ? 'rgba(0,255,163,0.2)' : 'rgba(245,158,11,0.2)', color: stillNeeded === 0 ? '#00FFA3' : '#F59E0B' }}>
+              {madeCount}/{picksNeeded} picks
+            </span>
+          )}
         </div>
         <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: 'rgba(0,255,163,0.12)', color: '#00FFA3' }}>{pick.region}</span>
       </div>
@@ -279,6 +375,27 @@ function AIPickCard({ pick, isPremium, usedTeams, onPickTeam }: {
             <div className="text-xs" style={{ color: '#6B6B80' }}>Win Probability</div>
           </div>
         </div>
+
+        {/* Multi-pick context banner */}
+        {isMultiPick && stillNeeded !== null && stillNeeded > 0 && (
+          <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl mb-3"
+            style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)' }}>
+            <Info className="w-4 h-4 flex-shrink-0" style={{ color: '#F59E0B' }} />
+            <p className="text-xs" style={{ color: '#A0A0B0' }}>
+              Your pool requires <span className="font-bold" style={{ color: '#F59E0B' }}>{picksNeeded} picks</span> this round.
+              You still need <span className="font-bold" style={{ color: '#F59E0B' }}>{stillNeeded} more</span>. See the edge table below for additional options.
+            </p>
+          </div>
+        )}
+        {isMultiPick && stillNeeded === 0 && (
+          <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl mb-3"
+            style={{ background: 'rgba(0,255,163,0.07)', border: '1px solid rgba(0,255,163,0.18)' }}>
+            <CheckCircle className="w-4 h-4 flex-shrink-0" style={{ color: '#00FFA3' }} />
+            <p className="text-xs font-semibold" style={{ color: '#00FFA3' }}>
+              All {picksNeeded} picks for this round are saved.
+            </p>
+          </div>
+        )}
 
         {/* Edge gain highlight */}
         <div className="flex items-center gap-3 px-4 py-3 rounded-xl mb-4"
@@ -745,17 +862,22 @@ export default function SurvivorPage() {
   const bracketReleased = countdown.done
 
   const [isPremium, setIsPremium] = useState(false)
+  const [testModeActive, setTestModeActive] = useState(false)
   const [pool, setPool] = useState<Record<string, unknown> | null>(null)
   const [picks, setPicks] = useState<SurvivorPick[]>([])
   const [loading, setLoading] = useState(true)
   const [showSetup, setShowSetup] = useState(false)
   const [usedTeams, setUsedTeams] = useState<string[]>([])
 
+  // When test mode is active, treat the bracket as released regardless of the date
+  const effectiveBracketReleased = bracketReleased || testModeActive
+
   const loadData = useCallback(async () => {
     const res = await fetch('/api/survivor')
     if (res.ok) {
       const data = await res.json()
       setIsPremium(data.isPremium || false)
+      setTestModeActive(data.testModeActive || false)
       setPool(data.pool || null)
       setPicks(data.picks || [])
       setUsedTeams((data.picks || []).map((p: SurvivorPick) => p.team_name))
@@ -814,8 +936,24 @@ export default function SurvivorPage() {
         <p className="text-sm" style={{ color: '#A0A0B0' }}>AI-powered survivor pool strategy for March Madness.</p>
       </div>
 
+      {/* ── TEST MODE BANNER ── */}
+      {testModeActive && (
+        <div className="mb-6 flex items-start gap-3 px-5 py-4 rounded-2xl"
+          style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.35)' }}>
+          <FlaskConical className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: '#F59E0B' }} />
+          <div>
+            <div className="text-sm font-black" style={{ color: '#F59E0B' }}>Test Bracket Mode Active</div>
+            <p className="text-xs mt-0.5" style={{ color: '#A0A0B0' }}>
+              The Survivor AI is running on a simulated 2026 projected bracket. All pick generation, round strategy,
+              pool size logic, and multi-pick handling can be tested and validated.
+              This mode will be overridden automatically once the official NCAA bracket releases on March 16.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* ── PRE-BRACKET ── */}
-      {!bracketReleased && (
+      {!effectiveBracketReleased && (
         <PreBracketOverlay
           countdown={countdown}
           pool={pool}
@@ -826,7 +964,7 @@ export default function SurvivorPage() {
       )}
 
       {/* ── POST-BRACKET ── */}
-      {bracketReleased && (
+      {effectiveBracketReleased && (
         <div className="space-y-8">
           {/* Pool setup */}
           {!pool && !showSetup && (
@@ -845,29 +983,68 @@ export default function SurvivorPage() {
           {pool && !showSetup && (
             <>
               {/* Pool bar */}
-              <div className="flex items-center justify-between px-5 py-3 rounded-2xl"
+              <div className="px-5 py-3 rounded-2xl"
                 style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                <div>
-                  <div className="text-sm font-bold" style={{ color: '#E6E6FA' }}>{pool.pool_name as string}</div>
-                  <div className="text-xs mt-0.5" style={{ color: '#6B6B80' }}>
-                    {pool.pool_size as string} pool · {(pool.pick_format as string).replace(/_/g, ' ')}
-                    {pool.team_reuse ? ' · Teams reusable' : ''}
-                    {(pool.strike_rule as string) === 'one_loss' ? ' · 1 strike allowed' : ''}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-bold" style={{ color: '#E6E6FA' }}>{pool.pool_name as string}</div>
+                    <div className="text-xs mt-0.5" style={{ color: '#6B6B80' }}>
+                      {pool.pool_size as string} pool · {(pool.pick_format as string).replace(/_/g, ' ')}
+                      {pool.team_reuse ? ' · Teams reusable' : ''}
+                      {(pool.strike_rule as string) === 'one_loss' ? ' · 1 strike allowed' : ''}
+                    </div>
                   </div>
+                  <button onClick={() => setShowSetup(true)} className="text-xs flex items-center gap-1 px-3 py-1.5 rounded-lg hover:bg-white/5"
+                    style={{ color: '#A0A0B0', border: '1px solid rgba(255,255,255,0.07)' }}>
+                    <RotateCcw className="w-3 h-3" /> Edit Pool
+                  </button>
                 </div>
-                <button onClick={() => setShowSetup(true)} className="text-xs flex items-center gap-1 px-3 py-1.5 rounded-lg hover:bg-white/5"
-                  style={{ color: '#A0A0B0', border: '1px solid rgba(255,255,255,0.07)' }}>
-                  <RotateCcw className="w-3 h-3" /> Edit Pool
-                </button>
+                {/* picks_per_round summary strip */}
+                {pool.pick_format === 'multiple_per_round' && pool.picks_per_round && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {NCAA_ROUNDS.map(({ key, label }) => {
+                      const ppr = pool.picks_per_round as PicksPerRound
+                      const count = ppr[key] ?? 1
+                      return (
+                        <span key={key} className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                          style={{ background: 'rgba(0,255,163,0.08)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.15)' }}>
+                          {label.replace('Round of ', 'R')} × {count}
+                        </span>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Used teams */}
               {usedTeams.length > 0 && <UsedTeamsBadge teams={usedTeams} />}
 
-              {/* AI Best Pick */}
-              {MOCK_AI_PICKS.map((pick) => (
-                <AIPickCard key={pick.round} pick={pick} isPremium={isPremium} usedTeams={usedTeams} onPickTeam={handlePickTeam} />
-              ))}
+              {/* AI Best Pick — aware of picks_per_round config */}
+              {MOCK_AI_PICKS.map((pick) => {
+                // Map round number to RoundKey for picks_per_round lookup
+                const roundKeyMap: Record<number, RoundKey> = {
+                  1: 'round_of_64', 2: 'round_of_32', 3: 'sweet_16',
+                  4: 'elite_8', 5: 'final_four', 6: 'championship',
+                }
+                const roundKey = roundKeyMap[pick.round]
+                const poolPicksPerRound = pool.pick_format === 'multiple_per_round'
+                  ? (pool.picks_per_round as PicksPerRound | null)
+                  : null
+                const picksNeeded = poolPicksPerRound && roundKey ? poolPicksPerRound[roundKey] : undefined
+                // Count picks already made for this round from history
+                const picksMade = picks.filter((p) => p.round_number === pick.round).length
+                return (
+                  <AIPickCard
+                    key={pick.round}
+                    pick={pick}
+                    isPremium={isPremium}
+                    usedTeams={usedTeams}
+                    onPickTeam={handlePickTeam}
+                    picksNeeded={picksNeeded}
+                    picksMade={picksMade}
+                  />
+                )
+              })}
 
               {/* Edge Table */}
               <SurvivorEdgeTable usedTeams={usedTeams} onPickTeam={handlePickTeam} />

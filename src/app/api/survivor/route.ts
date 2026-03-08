@@ -15,7 +15,10 @@ export async function GET() {
     .select('plan_type')
     .eq('id', session.userId)
     .single()
-  const isPremium = userRow?.plan_type === 'premium'
+  const planType = userRow?.plan_type ?? 'free'
+  // Premium: full-access plan. Madness: March Madness plan (also unlocks Survivor Pool AI).
+  const isPremium = planType === 'premium'
+  const hasMadnessAccess = planType === 'premium' || planType === 'madness'
 
   // Fetch active pool
   const { data: pool } = await supabaseAdmin
@@ -38,7 +41,15 @@ export async function GET() {
     picks = data || []
   }
 
-  return NextResponse.json({ pool: pool || null, picks, isPremium })
+  // Check if admin has enabled Test Bracket Mode
+  const { data: testModeSetting } = await supabaseAdmin
+    .from('admin_settings')
+    .select('value')
+    .eq('key', 'survivor_test_mode')
+    .single()
+  const testModeActive = testModeSetting?.value === 'true'
+
+  return NextResponse.json({ pool: pool || null, picks, isPremium: hasMadnessAccess, testModeActive })
 }
 
 // POST: create or update a survivor pool config
@@ -49,7 +60,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json()
-  const { pool_name, pool_size, pick_format, team_reuse, late_round_rule, strike_rule } = body
+  const { pool_name, pool_size, pick_format, team_reuse, late_round_rule, strike_rule, picks_per_round } = body
 
   // Deactivate existing pools first
   await supabaseAdmin
@@ -67,6 +78,8 @@ export async function POST(req: NextRequest) {
       team_reuse: team_reuse ?? false,
       late_round_rule: late_round_rule || 'none',
       strike_rule: strike_rule || 'one_strike',
+      // Only persist picks_per_round when format is multiple_per_round
+      picks_per_round: pick_format === 'multiple_per_round' ? (picks_per_round ?? null) : null,
       is_active: true,
     })
     .select()

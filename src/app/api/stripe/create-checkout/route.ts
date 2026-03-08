@@ -1,13 +1,26 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { supabaseAdmin } from '@/integrations/supabase/server'
-import { STRIPE_SECRET_KEY, STRIPE_PREMIUM_PRICE_ID, APP_URL } from '@/lib/stripe-config'
+import { STRIPE_SECRET_KEY, STRIPE_PREMIUM_PRICE_ID, STRIPE_MADNESS_PRICE_ID, APP_URL } from '@/lib/stripe-config'
 
-export async function POST() {
+export async function POST(req: NextRequest) {
   try {
     const session = await getSession()
     if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    // Accept optional plan param: 'premium' (default) or 'madness'
+    let plan = 'premium'
+    try {
+      const body = await req.json()
+      if (body.plan === 'madness') plan = 'madness'
+    } catch { /* no body — default to premium */ }
+
+    const priceId = plan === 'madness' ? STRIPE_MADNESS_PRICE_ID : STRIPE_PREMIUM_PRICE_ID
+
+    if (!priceId) {
+      return NextResponse.json({ error: `Price ID for plan "${plan}" is not configured.` }, { status: 500 })
     }
 
     const Stripe = (await import('stripe')).default
@@ -45,11 +58,12 @@ export async function POST() {
     const checkoutSession = await stripe.checkout.sessions.create({
       customer: customerId,
       payment_method_types: ['card'],
-      line_items: [{ price: STRIPE_PREMIUM_PRICE_ID, quantity: 1 }],
+      line_items: [{ price: priceId, quantity: 1 }],
       mode: 'subscription',
       success_url: `${APP_URL}/dashboard?upgrade=success`,
       cancel_url: `${APP_URL}/dashboard/pricing?upgrade=cancelled`,
-      metadata: { userId: user.id },
+      // Store which plan was purchased so the webhook can set plan_type correctly
+      metadata: { userId: user.id, plan },
     })
 
     return NextResponse.json({ url: checkoutSession.url })

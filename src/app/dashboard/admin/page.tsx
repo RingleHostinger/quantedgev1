@@ -39,7 +39,7 @@ interface User {
   created_at: string
 }
 
-type Tab = 'overview' | 'games' | 'predictions' | 'free-pick' | 'users' | 'visibility' | 'briefing' | 'injuries-admin' | 'overrides' | 'bracket-model' | 'bracket-mgmt' | 'pipeline' | 'grading'
+type Tab = 'overview' | 'games' | 'predictions' | 'free-pick' | 'users' | 'visibility' | 'briefing' | 'injuries-admin' | 'overrides' | 'bracket-model' | 'bracket-mgmt' | 'pipeline' | 'grading' | 'survivor-test'
 
 interface PipelineStatus {
   lastOddsRefresh: string | null
@@ -157,6 +157,41 @@ export default function AdminPage() {
   const [gradingMsg, setGradingMsg] = useState('')
   const [pendingPickCount, setPendingPickCount] = useState(0)
 
+  // Survivor test mode
+  const [survivorTestMode, setSurvivorTestMode] = useState(false)
+  const [survivorTestLoading, setSurvivorTestLoading] = useState(false)
+  const [survivorTestMsg, setSurvivorTestMsg] = useState('')
+
+  const loadSurvivorTestMode = async () => {
+    try {
+      const res = await fetch('/api/admin/survivor-test-mode')
+      if (res.ok) {
+        const data = await res.json()
+        setSurvivorTestMode(data.enabled)
+      }
+    } catch { /* ignore */ }
+  }
+
+  const toggleSurvivorTestMode = async (enabled: boolean) => {
+    setSurvivorTestLoading(true)
+    setSurvivorTestMsg('')
+    try {
+      const res = await fetch('/api/admin/survivor-test-mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setSurvivorTestMode(data.enabled)
+        setSurvivorTestMsg(data.enabled ? 'Test mode enabled — bracket is now live for testing.' : 'Test mode disabled — countdown restored.')
+      } else {
+        setSurvivorTestMsg('Failed to update setting.')
+      }
+    } catch { setSurvivorTestMsg('Error updating setting.') }
+    finally { setSurvivorTestLoading(false) }
+  }
+
   const loadGradingPicks = async (status = gradingFilter, league = gradingLeague) => {
     setGradingLoading(true)
     setGradingMsg('')
@@ -231,6 +266,8 @@ export default function AdminPage() {
     }).catch(() => {
       router.push('/dashboard')
     })
+    // Load survivor test mode state on mount
+    loadSurvivorTestMode()
   }, [router])
 
   const handleToggleVisibility = async (predId: string, currentPremium: boolean) => {
@@ -466,6 +503,7 @@ export default function AdminPage() {
     { id: 'overrides', label: 'Overrides', icon: Target },
     { id: 'bracket-model', label: 'Bracket Model', icon: FlaskConical },
     { id: 'bracket-mgmt', label: 'Bracket Mgmt', icon: Star },
+    { id: 'survivor-test', label: 'Survivor Test', icon: FlaskConical },
     { id: 'users', label: 'Users', icon: Users },
   ]
 
@@ -1673,6 +1711,105 @@ export default function AdminPage() {
                     <p className="text-sm" style={{ color: '#A0A0B0' }}>No users found</p>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Survivor Test Mode */}
+          {activeTab === 'survivor-test' && (
+            <div className="space-y-5">
+              <div>
+                <h2 className="text-lg font-bold text-white">Survivor Pool — Test Bracket Mode</h2>
+                <p className="text-sm mt-0.5" style={{ color: '#A0A0B0' }}>
+                  Bypass the Selection Sunday countdown and run the full Survivor AI experience using a simulated 2026 projected bracket.
+                  Use this to validate pick generation, round strategy, pool size logic, and multi-pick handling before launch.
+                </p>
+              </div>
+
+              {/* Warning banner */}
+              <div className="flex items-start gap-3 px-5 py-4 rounded-2xl"
+                style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.25)' }}>
+                <FlaskConical className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: '#F59E0B' }} />
+                <div>
+                  <div className="text-sm font-bold" style={{ color: '#F59E0B' }}>Pre-Launch Testing Only</div>
+                  <p className="text-xs mt-0.5" style={{ color: '#A0A0B0' }}>
+                    This mode is for internal testing only. When enabled, all users visiting the Survivor Pool page will see
+                    a yellow &ldquo;Test Mode Active&rdquo; banner and the full post-bracket AI experience with simulated data.
+                    Once the real NCAA bracket releases on <strong style={{ color: '#E6E6FA' }}>March 16, 2026</strong>, the system
+                    automatically switches to live bracket mode regardless of this setting.
+                  </p>
+                </div>
+              </div>
+
+              {/* Status + Toggle card */}
+              <div className="glass-card rounded-2xl p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <div className="text-sm font-bold mb-1" style={{ color: '#E6E6FA' }}>Test Bracket Mode</div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full" style={{ background: survivorTestMode ? '#00FFA3' : '#6B6B80' }} />
+                      <span className="text-xs font-semibold" style={{ color: survivorTestMode ? '#00FFA3' : '#6B6B80' }}>
+                        {survivorTestMode ? 'Active — Bracket simulated as released' : 'Inactive — Countdown shown to users'}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => toggleSurvivorTestMode(!survivorTestMode)}
+                    disabled={survivorTestLoading}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all disabled:opacity-50"
+                    style={survivorTestMode
+                      ? { background: 'rgba(255,107,107,0.12)', color: '#FF6B6B', border: '1px solid rgba(255,107,107,0.3)' }
+                      : { background: 'rgba(0,255,163,0.12)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.3)' }
+                    }
+                  >
+                    <FlaskConical className="w-4 h-4" />
+                    {survivorTestLoading ? 'Updating...' : survivorTestMode ? 'Disable Test Mode' : 'Enable Test Mode'}
+                  </button>
+                </div>
+
+                {survivorTestMsg && (
+                  <div className="text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.05)', color: '#A0A0B0' }}>
+                    {survivorTestMsg}
+                  </div>
+                )}
+              </div>
+
+              {/* What gets tested */}
+              <div className="glass-card rounded-2xl p-5">
+                <div className="text-xs font-bold uppercase tracking-wider mb-3" style={{ color: '#6B6B80' }}>What You Can Validate in Test Mode</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[
+                    { title: 'Pick Generation Logic', desc: 'AI Best Pick card shows with simulated Round of 64 data — verify team, win probability, edge gain, and reasoning.' },
+                    { title: 'Round Survival Strategy', desc: 'Edge Table and Reservation Tool populate with projected bracket data — test sorting, filtering, and future-round planning.' },
+                    { title: 'Pool Size Strategy', desc: 'Configure a small/medium/large pool and verify AI recommendations adjust accordingly in edge scoring.' },
+                    { title: 'Multiple Picks Per Round', desc: 'Set "Multiple picks per round" format and verify pick count badges, context banners, and picks-needed logic work correctly.' },
+                    { title: 'Premium vs Free Gating', desc: 'Verify that free users see lock overlays for AI Strategy Analysis and alternatives, while premium users get full detail.' },
+                    { title: 'Pick History Tracking', desc: 'Make picks using the "I Picked This Team" button and confirm they appear in the pool history, with used teams removed from recommendations.' },
+                  ].map(({ title, desc }) => (
+                    <div key={title} className="flex items-start gap-3 p-3 rounded-xl"
+                      style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                      <CheckCircle className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: '#00FFA3' }} />
+                      <div>
+                        <div className="text-xs font-bold mb-0.5" style={{ color: '#E6E6FA' }}>{title}</div>
+                        <div className="text-xs" style={{ color: '#6B6B80' }}>{desc}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Nav link to Survivor page */}
+              <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
+                style={{ background: 'rgba(0,255,163,0.04)', border: '1px solid rgba(0,255,163,0.15)' }}>
+                <Trophy className="w-4 h-4 flex-shrink-0" style={{ color: '#00FFA3' }} />
+                <span className="text-xs" style={{ color: '#A0A0B0' }}>
+                  After enabling, navigate to the{' '}
+                  <a href="/dashboard/survivor" target="_blank" rel="noopener noreferrer"
+                    className="font-bold underline" style={{ color: '#00FFA3' }}>
+                    Survivor Pool page
+                  </a>{' '}
+                  to test the full experience.
+                </span>
               </div>
             </div>
           )}

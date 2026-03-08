@@ -57,9 +57,10 @@ function PremiumGate() {
         style={{ background: 'rgba(0,255,163,0.1)', border: '1px solid rgba(0,255,163,0.2)' }}>
         <FlaskConical className="w-5 h-5" style={{ color: '#00FFA3' }} />
       </div>
-      <h2 className="text-2xl font-bold text-white mb-2">Bracket Lab is Premium Only</h2>
+      <h2 className="text-2xl font-bold text-white mb-2">Bracket Lab — Premium or Madness Special</h2>
       <p className="text-sm mb-2 max-w-md" style={{ color: '#A0A0B0' }}>
         Build or upload your March Madness bracket and get AI-powered analysis to maximize your pool win probability.
+        Available on the Madness Special plan ($19.99/mo) or Premium plan ($39.99/mo).
       </p>
       <ul className="text-sm space-y-1 mb-6" style={{ color: '#A0A0B0' }}>
         {[
@@ -77,7 +78,7 @@ function PremiumGate() {
       </ul>
       <Link href="/dashboard/pricing">
         <button className="px-8 py-3 rounded-xl font-bold gradient-green text-black hover:opacity-90 neon-glow">
-          Upgrade to Premium
+          View Plans
         </button>
       </Link>
     </div>
@@ -352,7 +353,8 @@ function ComparisonPanel({
 // ─── Main page ───────────────────────────────────────────────────────────────
 
 export default function BracketLabPage() {
-  const { isPremium, loading: authLoading } = useAuth()
+  // Both 'premium' and 'madness' plan users can access Bracket Lab
+  const { hasMadnessAccess: isPremium, loading: authLoading } = useAuth()
   const router = useRouter()
   const [brackets, setBrackets] = useState<BracketSummary[]>([])
   const [loading, setLoading] = useState(true)

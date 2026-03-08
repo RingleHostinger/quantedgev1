@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Star, Check, Shield, ChevronDown, ChevronUp, Lock } from 'lucide-react'
+import { Star, Check, Shield, ChevronDown, ChevronUp, Lock, Trophy, FlaskConical } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/hooks/useAuth'
 
@@ -12,24 +12,38 @@ const FREE_FEATURES = [
   'Win probability view',
 ]
 
+const MADNESS_FEATURES = [
+  'Bracket Lab — AI bracket builder & grader',
+  'Survivor Pool AI — round strategy engine',
+  'AI win probability per team',
+  'Upset radar & pool strategy',
+  'Bracket optimizer (3 AI versions)',
+  'Duplicate risk & uniqueness scoring',
+]
+
 const PREMIUM_FEATURES = [
+  'Everything in Madness Special',
   'Full Top AI Edges access',
   'Upset Radar',
   'Betting Heat Map',
   'Daily AI Briefing',
   'Model Performance tracking',
-  'Bracket Lab tools',
   'All predictions unlocked',
+  'Unlimited AI picks',
 ]
 
 const FAQ = [
+  {
+    q: 'What is the Madness Special plan?',
+    a: 'The Madness Special is a focused March Madness plan. It unlocks Bracket Lab and Survivor Pool AI only. Everything else behaves the same as a Free account.',
+  },
   {
     q: 'How many free picks do I get?',
     a: 'Free users receive 1 AI pick per day, selected by the QuantEdge team from the top available edges.',
   },
   {
     q: 'Can I cancel anytime?',
-    a: 'Yes. Subscriptions can be cancelled anytime from your Account page. You keep Premium access until the end of your billing period.',
+    a: 'Yes. Subscriptions can be cancelled anytime from your Account page. You keep access until the end of your billing period.',
   },
   {
     q: 'When does billing occur?',
@@ -44,10 +58,7 @@ const FAQ = [
 function FAQItem({ q, a }: { q: string; a: string }) {
   const [open, setOpen] = useState(false)
   return (
-    <div
-      className="rounded-xl overflow-hidden"
-      style={{ border: '1px solid rgba(255,255,255,0.07)' }}
-    >
+    <div className="rounded-xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
       <button
         onClick={() => setOpen(!open)}
         className="w-full flex items-center justify-between px-4 py-3.5 text-left"
@@ -69,13 +80,18 @@ function FAQItem({ q, a }: { q: string; a: string }) {
 }
 
 export default function PricingPage() {
-  const { isPremium } = useAuth()
-  const [loading, setLoading] = useState(false)
+  const { user, isPremium, isMadness } = useAuth()
+  const planType = user?.planType ?? 'free'
+  const [loadingPlan, setLoadingPlan] = useState<'premium' | 'madness' | null>(null)
 
-  const handleUpgrade = async () => {
-    setLoading(true)
+  const handleUpgrade = async (plan: 'premium' | 'madness') => {
+    setLoadingPlan(plan)
     try {
-      const res = await fetch('/api/stripe/create-checkout', { method: 'POST' })
+      const res = await fetch('/api/stripe/create-checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan }),
+      })
       const data = await res.json()
       if (data.url) {
         window.location.href = data.url
@@ -85,29 +101,27 @@ export default function PricingPage() {
     } catch {
       alert('Failed to start checkout. Please try again.')
     } finally {
-      setLoading(false)
+      setLoadingPlan(null)
     }
   }
 
   return (
-    <div className="p-6 max-w-3xl mx-auto space-y-10" style={{ background: '#0F0F1A', minHeight: '100%' }}>
+    <div className="p-6 max-w-5xl mx-auto space-y-10" style={{ background: '#0F0F1A', minHeight: '100%' }}>
 
       {/* Header */}
       <div className="text-center">
         <h1 className="text-3xl font-black mb-2" style={{ color: '#E6E6FA' }}>
-          Unlock the Full QuantEdge AI Model
+          Choose Your Plan
         </h1>
         <p className="text-base" style={{ color: '#A0A0B0' }}>
-          Get access to advanced AI betting insights, edges, and analytics.
+          Get access to AI-powered betting insights, edges, and analytics.
         </p>
       </div>
 
-      {/* Already premium banner */}
+      {/* Active plan banner */}
       {isPremium && (
-        <div
-          className="rounded-2xl px-5 py-4 flex items-center gap-3"
-          style={{ background: 'rgba(0,255,163,0.08)', border: '1px solid rgba(0,255,163,0.25)' }}
-        >
+        <div className="rounded-2xl px-5 py-4 flex items-center gap-3"
+          style={{ background: 'rgba(0,255,163,0.08)', border: '1px solid rgba(0,255,163,0.25)' }}>
           <Star className="w-5 h-5 flex-shrink-0" style={{ color: '#00FFA3' }} />
           <div>
             <p className="text-sm font-bold" style={{ color: '#00FFA3' }}>You&apos;re on Premium</p>
@@ -115,15 +129,23 @@ export default function PricingPage() {
           </div>
         </div>
       )}
+      {isMadness && !isPremium && (
+        <div className="rounded-2xl px-5 py-4 flex items-center gap-3"
+          style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)' }}>
+          <Trophy className="w-5 h-5 flex-shrink-0" style={{ color: '#F59E0B' }} />
+          <div>
+            <p className="text-sm font-bold" style={{ color: '#F59E0B' }}>You&apos;re on Madness Special</p>
+            <p className="text-xs mt-0.5" style={{ color: '#A0A0B0' }}>Bracket Lab and Survivor Pool AI are unlocked. Upgrade to Premium for full platform access.</p>
+          </div>
+        </div>
+      )}
 
-      {/* Two plan cards */}
-      <div className="grid md:grid-cols-2 gap-5">
+      {/* Three plan cards */}
+      <div className="grid md:grid-cols-3 gap-5">
 
         {/* Free Plan */}
-        <div
-          className="rounded-2xl p-7 flex flex-col"
-          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}
-        >
+        <div className="rounded-2xl p-6 flex flex-col"
+          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
           <div className="mb-5">
             <div className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: '#6B6B80' }}>Free</div>
             <div className="flex items-baseline gap-1 mb-1">
@@ -132,19 +154,20 @@ export default function PricingPage() {
             <p className="text-sm" style={{ color: '#6B6B80' }}>Forever free</p>
           </div>
 
-          <ul className="space-y-3 mb-7 flex-1">
+          <ul className="space-y-2.5 mb-7 flex-1">
             {FREE_FEATURES.map((feat) => (
               <li key={feat} className="flex items-center gap-3 text-sm">
-                <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(160,160,176,0.15)' }}>
+                <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+                  style={{ background: 'rgba(160,160,176,0.15)' }}>
                   <Check className="w-3 h-3" style={{ color: '#A0A0B0' }} />
                 </div>
                 <span style={{ color: '#A0A0B0' }}>{feat}</span>
               </li>
             ))}
-            {/* Locked features preview */}
-            {['Top AI Edges', 'Upset Radar', 'Betting Heat Map'].map((feat) => (
+            {['Bracket Lab', 'Survivor Pool AI', 'Top AI Edges'].map((feat) => (
               <li key={feat} className="flex items-center gap-3 text-sm opacity-40">
-                <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(255,255,255,0.05)' }}>
+                <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+                  style={{ background: 'rgba(255,255,255,0.05)' }}>
                   <Lock className="w-3 h-3" style={{ color: '#6B6B80' }} />
                 </div>
                 <span style={{ color: '#6B6B80' }}>{feat}</span>
@@ -158,42 +181,114 @@ export default function PricingPage() {
             className="w-full border-white/10"
             style={{ color: '#6B6B80' }}
           >
-            {isPremium ? 'Downgrade' : 'Get Started Free'}
+            {planType === 'free' ? 'Current Plan' : 'Free Plan'}
           </Button>
         </div>
 
-        {/* Premium Plan */}
-        <div
-          className="rounded-2xl p-7 flex flex-col relative"
+        {/* Madness Special */}
+        <div className="rounded-2xl p-6 flex flex-col relative"
           style={{
-            background: 'linear-gradient(135deg, rgba(0,255,163,0.07), rgba(59,130,246,0.07))',
-            border: '1px solid rgba(0,255,163,0.28)',
-            boxShadow: '0 0 30px rgba(0,255,163,0.08)',
-          }}
-        >
-          {/* Most Popular badge */}
-          <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-            <div
-              className="text-xs font-black px-4 py-1 rounded-full"
-              style={{ background: '#00FFA3', color: '#0F0F1A' }}
-            >
-              Most Popular
+            background: 'linear-gradient(135deg, rgba(245,158,11,0.07), rgba(251,191,36,0.05))',
+            border: isMadness && !isPremium ? '1px solid rgba(245,158,11,0.5)' : '1px solid rgba(245,158,11,0.25)',
+            boxShadow: isMadness && !isPremium ? '0 0 24px rgba(245,158,11,0.1)' : 'none',
+          }}>
+          {isMadness && !isPremium && (
+            <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+              <div className="text-xs font-black px-4 py-1 rounded-full"
+                style={{ background: '#F59E0B', color: '#0F0F1A' }}>
+                Current Plan
+              </div>
             </div>
-          </div>
-
+          )}
           <div className="mb-5">
-            <div className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: '#00FFA3' }}>Premium</div>
+            <div className="flex items-center gap-2 mb-3">
+              <Trophy className="w-4 h-4" style={{ color: '#F59E0B' }} />
+              <div className="text-xs font-bold uppercase tracking-widest" style={{ color: '#F59E0B' }}>Madness Special</div>
+            </div>
             <div className="flex items-baseline gap-1 mb-1">
               <span className="text-4xl font-black" style={{ color: '#E6E6FA' }}>$19.99</span>
               <span className="text-base" style={{ color: '#6B6B80' }}>/month</span>
             </div>
-            <p className="text-sm" style={{ color: '#6B6B80' }}>Cancel anytime</p>
+            <p className="text-sm" style={{ color: '#6B6B80' }}>March Madness tools only</p>
           </div>
 
-          <ul className="space-y-3 mb-7 flex-1">
+          <ul className="space-y-2.5 mb-7 flex-1">
+            {MADNESS_FEATURES.map((feat) => (
+              <li key={feat} className="flex items-center gap-3 text-sm">
+                <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+                  style={{ background: 'rgba(245,158,11,0.2)' }}>
+                  <Check className="w-3 h-3" style={{ color: '#F59E0B' }} />
+                </div>
+                <span style={{ color: '#E6E6FA' }}>{feat}</span>
+              </li>
+            ))}
+            {['Top AI Edges', 'Betting Heat Map', 'Daily AI Briefing'].map((feat) => (
+              <li key={feat} className="flex items-center gap-3 text-sm opacity-40">
+                <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+                  style={{ background: 'rgba(255,255,255,0.05)' }}>
+                  <Lock className="w-3 h-3" style={{ color: '#6B6B80' }} />
+                </div>
+                <span style={{ color: '#6B6B80' }}>{feat}</span>
+              </li>
+            ))}
+          </ul>
+
+          {isMadness && !isPremium ? (
+            <Button disabled className="w-full border-0"
+              style={{ background: 'rgba(245,158,11,0.15)', color: '#F59E0B' }}>
+              <Trophy className="w-4 h-4 mr-2" />
+              Current Plan
+            </Button>
+          ) : isPremium ? (
+            <Button disabled variant="outline" className="w-full border-white/10" style={{ color: '#6B6B80' }}>
+              Included in Premium
+            </Button>
+          ) : (
+            <Button
+              onClick={() => handleUpgrade('madness')}
+              disabled={loadingPlan !== null}
+              className="w-full font-black border-0 hover:opacity-90 py-4 text-sm"
+              style={{ background: 'rgba(245,158,11,0.9)', color: '#0F0F1A' }}
+            >
+              {loadingPlan === 'madness' ? 'Redirecting...' : (
+                <>
+                  <FlaskConical className="w-4 h-4 mr-2" />
+                  Get Madness Special
+                </>
+              )}
+            </Button>
+          )}
+        </div>
+
+        {/* Premium Plan */}
+        <div className="rounded-2xl p-6 flex flex-col relative"
+          style={{
+            background: 'linear-gradient(135deg, rgba(0,255,163,0.07), rgba(59,130,246,0.07))',
+            border: isPremium ? '1px solid rgba(0,255,163,0.5)' : '1px solid rgba(0,255,163,0.28)',
+            boxShadow: isPremium ? '0 0 30px rgba(0,255,163,0.12)' : '0 0 30px rgba(0,255,163,0.06)',
+          }}>
+          {!isMadness && (
+            <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+              <div className="text-xs font-black px-4 py-1 rounded-full"
+                style={{ background: isPremium ? '#00FFA3' : '#00FFA3', color: '#0F0F1A' }}>
+                {isPremium ? 'Current Plan' : 'Most Popular'}
+              </div>
+            </div>
+          )}
+          <div className="mb-5">
+            <div className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: '#00FFA3' }}>Premium</div>
+            <div className="flex items-baseline gap-1 mb-1">
+              <span className="text-4xl font-black" style={{ color: '#E6E6FA' }}>$39.99</span>
+              <span className="text-base" style={{ color: '#6B6B80' }}>/month</span>
+            </div>
+            <p className="text-sm" style={{ color: '#6B6B80' }}>Full platform access · Cancel anytime</p>
+          </div>
+
+          <ul className="space-y-2.5 mb-7 flex-1">
             {PREMIUM_FEATURES.map((feat) => (
               <li key={feat} className="flex items-center gap-3 text-sm">
-                <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(0,255,163,0.2)' }}>
+                <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+                  style={{ background: 'rgba(0,255,163,0.2)' }}>
                   <Check className="w-3 h-3" style={{ color: '#00FFA3' }} />
                 </div>
                 <span style={{ color: '#E6E6FA' }}>{feat}</span>
@@ -202,24 +297,21 @@ export default function PricingPage() {
           </ul>
 
           {isPremium ? (
-            <Button
-              disabled
-              className="w-full border-0"
-              style={{ background: 'rgba(0,255,163,0.15)', color: '#00FFA3' }}
-            >
+            <Button disabled className="w-full border-0"
+              style={{ background: 'rgba(0,255,163,0.15)', color: '#00FFA3' }}>
               <Star className="w-4 h-4 mr-2" />
               Current Plan
             </Button>
           ) : (
             <Button
-              onClick={handleUpgrade}
-              disabled={loading}
-              className="w-full gradient-green text-black font-black border-0 hover:opacity-90 neon-glow py-5 text-base"
+              onClick={() => handleUpgrade('premium')}
+              disabled={loadingPlan !== null}
+              className="w-full gradient-green text-black font-black border-0 hover:opacity-90 neon-glow py-4 text-sm"
             >
-              {loading ? 'Redirecting...' : (
+              {loadingPlan === 'premium' ? 'Redirecting...' : (
                 <>
                   <Star className="w-4 h-4 mr-2" />
-                  Upgrade to Premium
+                  {isMadness ? 'Upgrade to Premium' : 'Get Premium'}
                 </>
               )}
             </Button>

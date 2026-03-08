@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { TrendingUp, CheckCircle, XCircle, MinusCircle, Clock, ChevronDown, ChevronUp, BarChart3, Lock } from 'lucide-react'
+import { TrendingUp, CheckCircle, XCircle, MinusCircle, Clock, ChevronDown, ChevronUp, BarChart3, Lock, RefreshCw } from 'lucide-react'
 
 const LEAGUE_COLORS: Record<string, string> = {
   NBA: '#F97316', NFL: '#3B82F6', MLB: '#EF4444',
@@ -59,6 +59,36 @@ interface PerformanceData {
   season_avg_clv: number | null
   by_league: Record<string, { record: { wins: number; losses: number; pushes: number; total: number }; win_pct: number | null }>
   recent_picks: RecentPick[]
+}
+
+interface OfficialPick {
+  id: string
+  league: string
+  home_team: string
+  away_team: string
+  bet_type: string
+  pick_team: string
+  sportsbook_line: number | null
+  model_line: number | null
+  spread_edge: number | null
+  confidence_score: number
+  edge_score: number
+  result: string
+  commence_time: string
+  result_recorded_at: string | null
+  line_at_pick: number | null
+  closing_line: number | null
+}
+
+interface PendingPicksData {
+  picks: OfficialPick[]
+  slateStart: string
+  slateEnd: string
+}
+
+interface SettledPicksData {
+  picks: OfficialPick[]
+  stats: { wins: number; losses: number; pushes: number; total: number; winRate: number }
 }
 
 function ResultIcon({ result }: { result: string }) {
@@ -291,10 +321,153 @@ function PickRow({ pick }: { pick: RecentPick }) {
   )
 }
 
+function OfficialPickCard({ pick }: { pick: OfficialPick }) {
+  const [expanded, setExpanded] = useState(false)
+  const lc = LEAGUE_COLORS[pick.league] || '#A0A0B0'
+  const isPending = pick.result === 'pending'
+
+  const formatLine = (line: number | null) => {
+    if (line == null) return 'N/A'
+    if (pick.bet_type === 'spread') return line > 0 ? `+${line}` : `${line}`
+    return `${line}`
+  }
+
+  const pickDisplay = pick.bet_type === 'spread' && pick.sportsbook_line != null
+    ? `${pick.pick_team} ${formatLine(pick.sportsbook_line)}`
+    : pick.bet_type === 'total_over' ? 'OVER'
+    : pick.bet_type === 'total_under' ? 'UNDER'
+    : pick.pick_team
+
+  const gameTime = new Date(pick.commence_time).toLocaleDateString('en-US', {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  })
+
+  const resultStyles: Record<string, { bg: string; color: string; label: string }> = {
+    win:     { bg: 'rgba(0,255,163,0.12)',   color: '#00FFA3', label: 'WIN' },
+    loss:    { bg: 'rgba(255,107,107,0.12)', color: '#FF6B6B', label: 'LOSS' },
+    push:    { bg: 'rgba(160,160,176,0.12)', color: '#A0A0B0', label: 'PUSH' },
+    pending: { bg: 'rgba(107,107,128,0.10)', color: '#6B6B80', label: 'PENDING' },
+  }
+  const rs = resultStyles[pick.result] ?? resultStyles.pending
+
+  const edge = pick.spread_edge != null ? Math.abs(pick.spread_edge).toFixed(1) : null
+  const clv = pick.line_at_pick != null && pick.closing_line != null
+    ? Math.round((pick.line_at_pick - pick.closing_line) * 10) / 10
+    : null
+
+  return (
+    <div
+      className="rounded-xl overflow-hidden"
+      style={{
+        background: 'rgba(255,255,255,0.03)',
+        border: pick.result === 'win' ? '1px solid rgba(0,255,163,0.15)'
+          : pick.result === 'loss' ? '1px solid rgba(255,107,107,0.15)'
+          : '1px solid rgba(255,255,255,0.06)',
+      }}
+    >
+      <div className="px-4 py-3 flex items-center gap-3">
+        {/* Result icon */}
+        {isPending
+          ? <Clock className="w-4 h-4 flex-shrink-0" style={{ color: '#6B6B80' }} />
+          : pick.result === 'win' ? <CheckCircle className="w-4 h-4 flex-shrink-0" style={{ color: '#00FFA3' }} />
+          : pick.result === 'loss' ? <XCircle className="w-4 h-4 flex-shrink-0" style={{ color: '#FF6B6B' }} />
+          : <MinusCircle className="w-4 h-4 flex-shrink-0" style={{ color: '#A0A0B0' }} />
+        }
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap mb-0.5">
+            <span className="text-xs font-bold px-1.5 py-0.5 rounded" style={{ background: `${lc}18`, color: lc }}>
+              {pick.league}
+            </span>
+            <span className="text-xs font-bold px-1.5 py-0.5 rounded"
+              style={{ background: 'rgba(255,255,255,0.06)', color: '#A0A0B0' }}>
+              {BET_TYPE_LABELS[pick.bet_type] || pick.bet_type}
+            </span>
+            {edge && (
+              <span className="text-xs font-bold" style={{ color: '#00FFA3' }}>+{edge} edge</span>
+            )}
+          </div>
+          <div className="text-sm font-bold truncate" style={{ color: '#E6E6FA' }}>
+            {pick.away_team} @ {pick.home_team}
+          </div>
+          <div className="text-xs mt-0.5" style={{ color: '#6B6B80' }}>
+            Pick: <span style={{ color: '#00FFA3', fontWeight: 700 }}>{pickDisplay}</span>
+            <span className="ml-2" style={{ color: '#4A4A60' }}>{gameTime}</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className="text-xs font-black px-2 py-0.5 rounded-full"
+            style={{ background: rs.bg, color: rs.color }}>
+            {rs.label}
+          </span>
+          <button onClick={() => setExpanded(v => !v)} className="p-1 rounded" style={{ color: '#6B6B80' }}>
+            {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="px-4 pb-3 pt-0 space-y-2" style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+          <div className="grid grid-cols-3 gap-2 text-center text-xs pt-2">
+            <div className="rounded-lg p-2" style={{ background: 'rgba(255,255,255,0.03)' }}>
+              <div style={{ color: '#6B6B80' }}>Book Line</div>
+              <div className="font-bold mt-0.5" style={{ color: '#E6E6FA' }}>{formatLine(pick.sportsbook_line)}</div>
+            </div>
+            <div className="rounded-lg p-2" style={{ background: 'rgba(255,255,255,0.03)' }}>
+              <div style={{ color: '#6B6B80' }}>AI Line</div>
+              <div className="font-bold mt-0.5" style={{ color: '#00FFA3' }}>{formatLine(pick.model_line)}</div>
+            </div>
+            <div className="rounded-lg p-2" style={{ background: 'rgba(255,255,255,0.03)' }}>
+              <div style={{ color: '#6B6B80' }}>Confidence</div>
+              <div className="font-bold mt-0.5" style={{ color: '#A0A0B0' }}>{pick.confidence_score}%</div>
+            </div>
+          </div>
+          {(pick.line_at_pick != null || pick.closing_line != null) && (
+            <div className="grid grid-cols-3 gap-2 text-center text-xs">
+              <div className="rounded-lg p-2" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                <div style={{ color: '#6B6B80' }}>Line at Pick</div>
+                <div className="font-bold mt-0.5" style={{ color: '#E6E6FA' }}>
+                  {pick.line_at_pick != null ? formatLine(pick.line_at_pick) : '—'}
+                </div>
+              </div>
+              <div className="rounded-lg p-2" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                <div style={{ color: '#6B6B80' }}>Closing Line</div>
+                <div className="font-bold mt-0.5" style={{ color: '#E6E6FA' }}>
+                  {pick.closing_line != null ? formatLine(pick.closing_line) : '—'}
+                </div>
+              </div>
+              <div className="rounded-lg p-2"
+                style={{
+                  background: clv == null ? 'rgba(255,255,255,0.03)'
+                    : clv > 0 ? 'rgba(0,255,163,0.07)'
+                    : clv < 0 ? 'rgba(255,107,107,0.07)'
+                    : 'rgba(255,255,255,0.03)',
+                }}>
+                <div style={{ color: '#6B6B80' }}>CLV</div>
+                <div className="font-bold mt-0.5"
+                  style={{ color: clv == null ? '#6B6B80' : clv > 0 ? '#00FFA3' : clv < 0 ? '#FF6B6B' : '#A0A0B0' }}>
+                  {clv != null ? (clv > 0 ? `+${clv}` : `${clv}`) : '—'}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function ModelPerformancePage() {
   const [data, setData] = useState<PerformanceData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
+
+  // Pick tabs
+  const [picksTab, setPicksTab] = useState<'pending' | 'settled'>('pending')
+  const [pendingData, setPendingData] = useState<PendingPicksData | null>(null)
+  const [settledData, setSettledData] = useState<SettledPicksData | null>(null)
+  const [picksLoading, setPicksLoading] = useState(false)
 
   useEffect(() => {
     fetch('/api/model-performance')
@@ -302,6 +475,19 @@ export default function ModelPerformancePage() {
       .then((d) => { setData(d); setLoading(false) })
       .catch(() => { setError(true); setLoading(false) })
   }, [])
+
+  // Fetch picks for the active tab
+  useEffect(() => {
+    setPicksLoading(true)
+    fetch(`/api/official-picks?tab=${picksTab}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (picksTab === 'pending') setPendingData(d as PendingPicksData)
+        else setSettledData(d as SettledPicksData)
+        setPicksLoading(false)
+      })
+      .catch(() => setPicksLoading(false))
+  }, [picksTab])
 
   if (loading) {
     return (
@@ -466,24 +652,48 @@ export default function ModelPerformancePage() {
         </div>
       )}
 
-      {/* Recent picks log */}
+      {/* ── Official Picks: Pending / Settled tabs ── */}
       <div>
+        {/* Section header */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <BarChart3 className="w-4 h-4" style={{ color: '#A0A0B0' }} />
             <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: '#6B6B80' }}>
-              Official Pick Log
+              Official Picks
             </h2>
           </div>
-          {!data.isPremium && (
-            <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full"
-              style={{ background: 'rgba(0,255,163,0.1)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.2)' }}>
-              <Lock className="w-2.5 h-2.5" /> Premium
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {!data.isPremium && (
+              <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full"
+                style={{ background: 'rgba(0,255,163,0.1)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.2)' }}>
+                <Lock className="w-2.5 h-2.5" /> Premium
+              </span>
+            )}
+            {data.isPremium && (
+              <button
+                onClick={() => {
+                  setPicksLoading(true)
+                  fetch(`/api/official-picks?tab=${picksTab}`)
+                    .then(r => r.json())
+                    .then(d => {
+                      if (picksTab === 'pending') setPendingData(d as PendingPicksData)
+                      else setSettledData(d as SettledPicksData)
+                      setPicksLoading(false)
+                    })
+                    .catch(() => setPicksLoading(false))
+                }}
+                className="p-1.5 rounded-lg hover:bg-white/5 transition-colors"
+                style={{ color: '#6B6B80' }}
+                title="Refresh"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${picksLoading ? 'animate-spin' : ''}`} />
+              </button>
+            )}
+          </div>
         </div>
 
         {!data.isPremium ? (
+          /* ── Free user: lock overlay ── */
           <div
             className="rounded-2xl p-8 text-center"
             style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}
@@ -492,9 +702,9 @@ export default function ModelPerformancePage() {
               style={{ background: 'rgba(0,255,163,0.08)', border: '1px solid rgba(0,255,163,0.2)' }}>
               <Lock className="w-5 h-5" style={{ color: '#00FFA3' }} />
             </div>
-            <p className="font-bold mb-1" style={{ color: '#E6E6FA' }}>Pick Log is Premium Only</p>
+            <p className="font-bold mb-1" style={{ color: '#E6E6FA' }}>Official Picks are Premium Only</p>
             <p className="text-sm mb-5" style={{ color: '#6B6B80' }}>
-              View every official pick with bet details, lines, edge scores, and CLV tracking.
+              See today&apos;s pending picks and full graded pick history with bet details, lines, edge scores, and CLV tracking.
             </p>
             <Link href="/dashboard/settings">
               <button
@@ -505,22 +715,116 @@ export default function ModelPerformancePage() {
               </button>
             </Link>
           </div>
-        ) : data.recent_picks.length === 0 ? (
-          <div
-            className="rounded-2xl p-10 text-center"
-            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}
-          >
-            <TrendingUp className="w-8 h-8 mx-auto mb-2" style={{ color: '#4A4A60' }} />
-            <p className="font-semibold" style={{ color: '#E6E6FA' }}>No official picks recorded yet</p>
-            <p className="text-sm mt-1" style={{ color: '#6B6B80' }}>
-              Official picks are selected automatically after each prediction refresh.
-            </p>
-          </div>
         ) : (
-          <div className="space-y-2">
-            {data.recent_picks.map((pick) => (
-              <PickRow key={pick.id} pick={pick} />
-            ))}
+          /* ── Premium user: tabbed picks ── */
+          <div>
+            {/* Tab bar */}
+            <div className="flex gap-1 mb-4 p-1 rounded-xl"
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', width: 'fit-content' }}>
+              {(['pending', 'settled'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setPicksTab(tab)}
+                  className="px-4 py-1.5 rounded-lg text-xs font-bold transition-all capitalize"
+                  style={
+                    picksTab === tab
+                      ? { background: 'rgba(0,255,163,0.15)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.3)' }
+                      : { color: '#6B6B80' }
+                  }
+                >
+                  {tab === 'pending' ? 'Pending' : 'Settled'}
+                  {tab === 'pending' && pendingData && pendingData.picks.length > 0 && (
+                    <span className="ml-1.5 text-[10px] font-black px-1.5 py-0.5 rounded-full"
+                      style={{ background: 'rgba(0,255,163,0.2)', color: '#00FFA3' }}>
+                      {pendingData.picks.length}/5
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* ── Pending tab ── */}
+            {picksTab === 'pending' && (
+              <>
+                {picksLoading && !pendingData ? (
+                  <div className="space-y-2">
+                    {[1, 2, 3].map(i => (
+                      <div key={i} className="h-16 rounded-xl animate-pulse" style={{ background: 'rgba(255,255,255,0.04)' }} />
+                    ))}
+                  </div>
+                ) : !pendingData || pendingData.picks.length === 0 ? (
+                  <div className="rounded-2xl p-10 text-center"
+                    style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                    <Clock className="w-8 h-8 mx-auto mb-2" style={{ color: '#4A4A60' }} />
+                    <p className="font-semibold" style={{ color: '#E6E6FA' }}>No pending picks for today</p>
+                    <p className="text-sm mt-1" style={{ color: '#6B6B80' }}>
+                      Official picks are published after the daily model run at 2 AM EST.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    {/* Slate date label */}
+                    {pendingData.slateStart && (
+                      <p className="text-xs mb-3" style={{ color: '#4A4A60' }}>
+                        Sports day: {new Date(pendingData.slateStart).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                        {' → '}
+                        {new Date(pendingData.slateEnd).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                      </p>
+                    )}
+                    <div className="space-y-2">
+                      {pendingData.picks.map((pick) => (
+                        <OfficialPickCard key={pick.id} pick={pick} />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+
+            {/* ── Settled tab ── */}
+            {picksTab === 'settled' && (
+              <>
+                {picksLoading && !settledData ? (
+                  <div className="space-y-2">
+                    {[1, 2, 3].map(i => (
+                      <div key={i} className="h-16 rounded-xl animate-pulse" style={{ background: 'rgba(255,255,255,0.04)' }} />
+                    ))}
+                  </div>
+                ) : !settledData || settledData.picks.length === 0 ? (
+                  <div className="rounded-2xl p-10 text-center"
+                    style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                    <TrendingUp className="w-8 h-8 mx-auto mb-2" style={{ color: '#4A4A60' }} />
+                    <p className="font-semibold" style={{ color: '#E6E6FA' }}>No settled picks yet</p>
+                    <p className="text-sm mt-1" style={{ color: '#6B6B80' }}>
+                      Picks move here automatically once game results are recorded.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    {/* Stats bar */}
+                    <div className="flex gap-4 mb-4 p-4 rounded-2xl"
+                      style={{ background: 'rgba(0,255,163,0.05)', border: '1px solid rgba(0,255,163,0.15)' }}>
+                      {[
+                        { label: 'W', value: settledData.stats.wins, color: '#00FFA3' },
+                        { label: 'L', value: settledData.stats.losses, color: '#FF6B6B' },
+                        { label: 'P', value: settledData.stats.pushes, color: '#A0A0B0' },
+                        { label: 'Win %', value: `${settledData.stats.winRate}%`, color: '#00FFA3' },
+                      ].map(({ label, value, color }) => (
+                        <div key={label} className="text-center">
+                          <div className="text-xl font-black" style={{ color }}>{value}</div>
+                          <div className="text-[10px] mt-0.5" style={{ color: '#6B6B80' }}>{label}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="space-y-2">
+                      {settledData.picks.map((pick) => (
+                        <OfficialPickCard key={pick.id} pick={pick} />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </>
+            )}
           </div>
         )}
       </div>

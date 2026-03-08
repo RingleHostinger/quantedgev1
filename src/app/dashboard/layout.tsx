@@ -6,7 +6,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import {
   LayoutDashboard, Target, Lightbulb,
   DollarSign, Settings, LogOut, Star, Menu, Shield, Zap, AlertTriangle, Trophy,
-  Newspaper, BarChart2, AlertOctagon, FlaskConical, TrendingUp, CheckSquare
+  Newspaper, BarChart2, AlertOctagon, FlaskConical, TrendingUp
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -20,7 +20,6 @@ const navItems = [
   { href: '/dashboard', label: 'Home', icon: LayoutDashboard },
   { href: '/dashboard/briefing', label: 'Daily Briefing', icon: Newspaper },
   { href: '/dashboard/edges', label: 'Top AI Edges', icon: Zap },
-  { href: '/dashboard/official-picks', label: 'Official Picks', icon: CheckSquare },
   { href: '/dashboard/heatmap', label: 'Betting Heat Map', icon: BarChart2 },
   { href: '/dashboard/picks', label: 'Predictions', icon: Target },
   { href: '/dashboard/survivor', label: 'Survivor Pool AI', icon: Trophy },
@@ -41,7 +40,7 @@ const adminNavItems = [
 ]
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { user, loading, logout, isPremium, isAdmin } = useAuth()
+  const { user, loading, logout, isPremium, isMadness, isAdmin } = useAuth()
   const pathname = usePathname()
   const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -184,16 +183,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <Link href="/dashboard/pricing" onClick={() => setSidebarOpen(false)}>
             <div
               className="rounded-xl p-3 cursor-pointer hover:opacity-90 transition-opacity"
-              style={{
+              style={isMadness ? {
+                background: 'linear-gradient(135deg, rgba(245,158,11,0.12), rgba(0,255,163,0.08))',
+                border: '1px solid rgba(245,158,11,0.3)',
+              } : {
                 background: 'linear-gradient(135deg, rgba(0,255,163,0.12), rgba(59,130,246,0.12))',
                 border: '1px solid rgba(0,255,163,0.25)',
               }}
             >
               <div className="flex items-center gap-2 mb-1">
-                <Star className="w-3 h-3" style={{ color: '#00FFA3' }} />
-                <span className="text-xs font-semibold" style={{ color: '#00FFA3' }}>Upgrade to Premium</span>
+                <Star className="w-3 h-3" style={{ color: isMadness ? '#F59E0B' : '#00FFA3' }} />
+                <span className="text-xs font-semibold" style={{ color: isMadness ? '#F59E0B' : '#00FFA3' }}>
+                  {isMadness ? 'Upgrade to Full Premium' : 'Upgrade to Premium'}
+                </span>
               </div>
-              <p className="text-xs" style={{ color: '#A0A0B0' }}>Unlock unlimited picks & AI insights</p>
+              <p className="text-xs" style={{ color: '#A0A0B0' }}>
+                {isMadness ? 'Unlock full platform access & AI edges' : 'Unlock unlimited picks & AI insights'}
+              </p>
             </div>
           </Link>
         )}
@@ -275,10 +281,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               style={
                 isPremium
                   ? { background: 'rgba(0,255,163,0.15)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.3)' }
+                  : isMadness
+                  ? { background: 'rgba(245,158,11,0.15)', color: '#F59E0B', border: '1px solid rgba(245,158,11,0.3)' }
                   : { background: 'rgba(160,160,176,0.12)', color: '#A0A0B0', border: '1px solid rgba(255,255,255,0.08)' }
               }
             >
-              {isPremium ? '★ PREMIUM' : 'FREE'}
+              {isPremium ? '★ PREMIUM' : isMadness ? '★ MADNESS' : 'FREE'}
             </Badge>
             <span className="text-sm font-medium hidden sm:block" style={{ color: '#E6E6FA' }}>{user.name}</span>
             {!isPremium && (

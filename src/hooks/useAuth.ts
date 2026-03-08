@@ -58,8 +58,13 @@ export function useAuth() {
     router.push('/')
   }
 
+  // isPremium: full-access plan only
   const isPremium = user?.planType === 'premium'
+  // isMadness: March Madness plan — Bracket Lab + Survivor only
+  const isMadness = user?.planType === 'madness'
+  // hasMadnessAccess: either premium (full) or madness plan can use March Madness tools
+  const hasMadnessAccess = isPremium || isMadness
   const isAdmin = user?.role === 'admin'
 
-  return { user, loading, logout, isPremium, isAdmin, refetch: fetchUser }
+  return { user, loading, logout, isPremium, isMadness, hasMadnessAccess, isAdmin, refetch: fetchUser }
 }
