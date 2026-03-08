@@ -907,9 +907,9 @@ function AIPickCard({ pick, isPremium, usedTeams, onPickTeam, picksNeeded, picks
             <span className="text-sm font-bold" style={{ color: '#00FFA3' }}>Pick Saved</span>
           </div>
         ) : (
-          <Button onClick={() => { setConfirming(true); onPickTeam(pick.team, pick.round); setTimeout(() => setConfirming(false), 1500) }}
+          <Button onClick={async () => { setConfirming(true); await onPickTeam(pick.team, pick.round); setConfirming(false) }}
             disabled={confirming} className="w-full gradient-green text-black font-black py-4 rounded-xl border-0 hover:opacity-90 neon-glow">
-            {confirming ? <><CheckCircle className="w-4 h-4 mr-2" />Pick Saved!</> : 'I Picked This Team'}
+            {confirming ? <><CheckCircle className="w-4 h-4 mr-2" />Saving...</> : 'I Picked This Team'}
           </Button>
         )}
       </div>
@@ -1341,7 +1341,7 @@ export default function SurvivorPage() {
     if (!activePool) return
     const row = MOCK_EDGE_TABLE.find((r) => r.team === teamName)
     const aiPick = MOCK_AI_PICKS.find((p) => p.round === roundNumber) ?? MOCK_AI_PICKS[0]
-    await fetch('/api/survivor', {
+    const res = await fetch('/api/survivor', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1356,10 +1356,21 @@ export default function SurvivorPage() {
         ai_confidence: aiPick.aiConfidence,
       }),
     })
-    // Refresh picks from server (so we get the real id)
-    const res = await fetch(`/api/survivor?pool_id=${activePool.id}`)
-    if (res.ok) {
-      const data = await res.json()
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}))
+      if (res.status === 409 && errData.limitReached) {
+        showToast(errData.error ?? 'Round pick limit reached', 'error')
+      } else if (!errData.duplicate) {
+        showToast('Failed to save pick', 'error')
+      }
+      return
+    }
+
+    // Refresh picks from server (so we get the real ids and latest state)
+    const picksRes = await fetch(`/api/survivor?pool_id=${activePool.id}`)
+    if (picksRes.ok) {
+      const data = await picksRes.json()
       setPicks(data.picks || [])
     }
     showToast(`Pick Saved — ${teamName} added to ${ROUND_LABEL[roundNumber]}`)

@@ -207,23 +207,59 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
   }
 
-  // Verify pool belongs to this user
+  // Verify pool belongs to this user and get pool config
   const { data: poolRow } = await supabaseAdmin
     .from('survivor_pools')
-    .select('id')
+    .select('id, pick_format, picks_per_round')
     .eq('id', pool_id)
     .eq('user_id', session.userId)
     .single()
 
   if (!poolRow) return NextResponse.json({ error: 'Pool not found' }, { status: 404 })
 
-  // Replace any existing pick for this round in this pool
-  await supabaseAdmin
+  // Determine pick limit for this round
+  // - multiple_per_round pools: look up picks_per_round JSONB for this round
+  // - all other formats: exactly 1 pick per round (replace mode)
+  const roundKeyMap: Record<number, string> = {
+    1: 'round_of_64', 2: 'round_of_32', 3: 'sweet_16',
+    4: 'elite_8', 5: 'final_four', 6: 'championship',
+  }
+  let pickLimit = 1
+  if (poolRow.pick_format === 'multiple_per_round' && poolRow.picks_per_round) {
+    const roundKey = roundKeyMap[round_number]
+    const ppr = poolRow.picks_per_round as Record<string, number>
+    pickLimit = roundKey ? (ppr[roundKey] ?? 1) : 1
+  }
+
+  // Fetch existing picks for this round
+  const { data: existingPicks } = await supabaseAdmin
     .from('survivor_picks')
-    .delete()
+    .select('id, team_name')
     .eq('pool_id', pool_id)
     .eq('round_number', round_number)
 
+  const existing = existingPicks ?? []
+
+  // If the same team is already saved for this round, return it idempotently
+  const duplicate = existing.find((p) => p.team_name.toLowerCase() === team_name.toLowerCase())
+  if (duplicate) {
+    const { data: existingPick } = await supabaseAdmin
+      .from('survivor_picks')
+      .select('*')
+      .eq('id', duplicate.id)
+      .single()
+    return NextResponse.json({ pick: existingPick, duplicate: true })
+  }
+
+  // If at the pick limit for this round, refuse to add more
+  if (existing.length >= pickLimit) {
+    return NextResponse.json(
+      { error: `Round of ${round_number} already has ${pickLimit} pick${pickLimit !== 1 ? 's' : ''} saved. Remove one to add another.`, limitReached: true },
+      { status: 409 }
+    )
+  }
+
+  // Append the new pick (do NOT delete existing picks)
   const { data: pick, error } = await supabaseAdmin
     .from('survivor_picks')
     .insert({

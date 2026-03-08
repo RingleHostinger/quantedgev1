@@ -153,23 +153,32 @@ export async function POST(req: NextRequest) {
   })
 }
 
+// Vercel Cron Jobs send GET requests — this handler runs the full pipeline
+// when called by the cron scheduler, and also accepts a ?status=1 query
+// param to return status info without running the pipeline (for monitoring).
 export async function GET(req: NextRequest) {
   if (!(await isAuthorized(req))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { data: pendingPicks } = await supabaseAdmin
-    .from('official_picks')
-    .select('id')
-    .eq('result', 'pending')
+  // ?status=1 → return info without running the pipeline
+  if (req.nextUrl.searchParams.get('status')) {
+    const { data: pendingPicks } = await supabaseAdmin
+      .from('official_picks')
+      .select('id')
+      .eq('result', 'pending')
 
-  return NextResponse.json({
-    endpoint: '/api/cron/odds-refresh',
-    schedule: '0 * * * *',
-    description: [
-      'Hourly run: refreshes odds, recalculates predictions, captures CLV,',
-      'fetches final scores, and grades any newly-completed official picks.',
-    ].join(' '),
-    pendingPicksToGrade: (pendingPicks ?? []).length,
-  })
+    return NextResponse.json({
+      endpoint: '/api/cron/odds-refresh',
+      schedule: '0 * * * *',
+      description: [
+        'Hourly run: refreshes odds, recalculates predictions, captures CLV,',
+        'fetches final scores, and grades any newly-completed official picks.',
+      ].join(' '),
+      pendingPicksToGrade: (pendingPicks ?? []).length,
+    })
+  }
+
+  // No ?status param — run the full pipeline (Vercel cron calls GET)
+  return POST(req)
 }
