@@ -282,6 +282,174 @@ function BracketPlaceholder() {
   )
 }
 
+// ─── Survivor event system ─────────────────────────────────────────────────
+type SurvivorEventType = 'ENTRY_ELIMINATED' | 'ROUND_ADVANCED' | 'TOURNAMENT_WIN'
+
+interface SurvivorEvent {
+  type: SurvivorEventType
+  title: string
+  message: string
+  round?: number // for ROUND_ADVANCED, the round that was just completed
+}
+
+// Keys are scoped to pool + round so each is fired at most once per pool-round
+function seenKey(poolId: string, eventType: SurvivorEventType, round?: number) {
+  return `survivor_seen::${poolId}::${eventType}${round != null ? `::r${round}` : ''}`
+}
+function markSeen(poolId: string, eventType: SurvivorEventType, round?: number) {
+  try { localStorage.setItem(seenKey(poolId, eventType, round), '1') } catch { /* ignore */ }
+}
+function hasSeen(poolId: string, eventType: SurvivorEventType, round?: number) {
+  try { return !!localStorage.getItem(seenKey(poolId, eventType, round)) } catch { return false }
+}
+
+/**
+ * Inspect picks + pool config and return the first unseen event to show,
+ * or null if none.
+ */
+function detectSurvivorEvent(
+  pool: Pool,
+  picks: SurvivorPick[],
+): SurvivorEvent | null {
+  if (picks.length === 0) return null
+
+  const isOneStrike = pool.strike_rule === 'one_strike' || pool.strike_rule === 'one_loss'
+
+  // --- TOURNAMENT_WIN: every pick across all rounds won (≥4 rounds required) ---
+  const roundsWithPicks = [...new Set(picks.map((p) => p.round_number))].sort((a, b) => a - b)
+  const lastRound = roundsWithPicks[roundsWithPicks.length - 1] ?? 0
+  if (
+    lastRound >= 4 &&
+    picks.length > 0 &&
+    picks.every((p) => p.result === 'won' || p.result === 'win') &&
+    !hasSeen(pool.id, 'TOURNAMENT_WIN')
+  ) {
+    return {
+      type: 'TOURNAMENT_WIN',
+      title: 'Survivor Champion',
+      message: 'You survived the entire tournament.',
+    }
+  }
+
+  // --- ENTRY_ELIMINATED: at least one pick lost and pool rule = one strike ---
+  const elimPick = picks.find((p) => p.result === 'eliminated' || p.result === 'loss')
+  if (
+    elimPick &&
+    isOneStrike &&
+    !hasSeen(pool.id, 'ENTRY_ELIMINATED')
+  ) {
+    return {
+      type: 'ENTRY_ELIMINATED',
+      title: 'Bracket Busted',
+      message: 'Your survivor entry has been eliminated.',
+    }
+  }
+
+  // --- ROUND_ADVANCED: all picks in a completed round won ---
+  for (const round of roundsWithPicks) {
+    const roundPicks = picks.filter((p) => p.round_number === round)
+    const allWon = roundPicks.length > 0 && roundPicks.every((p) => p.result === 'won' || p.result === 'win')
+    if (allWon && !hasSeen(pool.id, 'ROUND_ADVANCED', round)) {
+      const nextRoundLabel = ROUND_LABEL[round + 1] ?? 'the next round'
+      return {
+        type: 'ROUND_ADVANCED',
+        title: `Welcome to the ${nextRoundLabel}`,
+        message: 'All of your picks advanced.',
+        round,
+      }
+    }
+  }
+
+  return null
+}
+
+// ─── EventPopup ────────────────────────────────────────────────────────────
+const EVENT_STYLES: Record<SurvivorEventType, {
+  icon: string; gradientFrom: string; gradientTo: string
+  borderColor: string; titleColor: string; iconBg: string
+}> = {
+  ENTRY_ELIMINATED: {
+    icon: '💀',
+    gradientFrom: 'rgba(255,107,107,0.10)',
+    gradientTo: 'rgba(239,68,68,0.06)',
+    borderColor: 'rgba(255,107,107,0.35)',
+    titleColor: '#FF6B6B',
+    iconBg: 'rgba(255,107,107,0.15)',
+  },
+  ROUND_ADVANCED: {
+    icon: '🏀',
+    gradientFrom: 'rgba(0,255,163,0.10)',
+    gradientTo: 'rgba(6,182,212,0.06)',
+    borderColor: 'rgba(0,255,163,0.35)',
+    titleColor: '#00FFA3',
+    iconBg: 'rgba(0,255,163,0.15)',
+  },
+  TOURNAMENT_WIN: {
+    icon: '🏆',
+    gradientFrom: 'rgba(245,158,11,0.12)',
+    gradientTo: 'rgba(251,191,36,0.06)',
+    borderColor: 'rgba(245,158,11,0.4)',
+    titleColor: '#F59E0B',
+    iconBg: 'rgba(245,158,11,0.15)',
+  },
+}
+
+function EventPopup({
+  event, onDismiss,
+}: {
+  event: SurvivorEvent
+  onDismiss: () => void
+}) {
+  const s = EVENT_STYLES[event.type]
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(6px)' }}
+      onClick={onDismiss}
+    >
+      <div
+        className="relative w-full max-w-sm rounded-3xl p-8 text-center shadow-2xl"
+        style={{
+          background: `linear-gradient(135deg, ${s.gradientFrom}, ${s.gradientTo})`,
+          border: `1px solid ${s.borderColor}`,
+          boxShadow: `0 20px 60px rgba(0,0,0,0.5), 0 0 40px ${s.gradientFrom}`,
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Icon */}
+        <div
+          className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5 text-3xl"
+          style={{ background: s.iconBg, border: `1px solid ${s.borderColor}` }}
+        >
+          {s.icon}
+        </div>
+
+        {/* Title */}
+        <h2 className="text-2xl font-black mb-2" style={{ color: s.titleColor }}>
+          {event.title}
+        </h2>
+
+        {/* Message */}
+        <p className="text-sm leading-relaxed mb-7" style={{ color: '#C0C0D0' }}>
+          {event.message}
+        </p>
+
+        {/* Dismiss */}
+        <button
+          onClick={onDismiss}
+          className="px-8 py-3 rounded-2xl text-sm font-black transition-all hover:opacity-90"
+          style={{
+            background: s.titleColor,
+            color: event.type === 'ENTRY_ELIMINATED' ? '#fff' : '#000',
+          }}
+        >
+          {event.type === 'ENTRY_ELIMINATED' ? 'I Understand' : 'Let\'s Go!'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ─── InlineToast ───────────────────────────────────────────────────────────
 function InlineToast({ toast }: { toast: ToastState }) {
   if (!toast) return null
@@ -730,7 +898,7 @@ interface SimResult {
 }
 
 // ─── SimulationPanel ───────────────────────────────────────────────────────
-function SimulationPanel({ picks }: { picks: SurvivorPick[] }) {
+function SimulationPanel({ picks, onResult }: { picks: SurvivorPick[]; onResult?: (r: SimResult) => void }) {
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<SimResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -757,7 +925,9 @@ function SimulationPanel({ picks }: { picks: SurvivorPick[] }) {
         body: JSON.stringify({ picks: simPicks }),
       })
       if (!res.ok) throw new Error('Simulation failed')
-      setResult(await res.json())
+      const data: SimResult = await res.json()
+      setResult(data)
+      onResult?.(data)
     } catch {
       setError('Simulation failed. Please try again.')
     }
@@ -888,6 +1058,312 @@ function SimulationPanel({ picks }: { picks: SurvivorPick[] }) {
   )
 }
 
+// ─── AI Strategy Coach ─────────────────────────────────────────────────────
+interface WeakPoint { team: string; round: number; issue: string }
+interface SaveLater { team: string; reason: string; betterRound: string }
+interface Replacement { replace: string; replaceRound: number; with: string; reason: string; projectedImpact: string }
+
+interface StrategyReview {
+  currentSurvivalProbability: number | null
+  overallAssessment: string
+  weakPoints: WeakPoint[]
+  saveForLater: SaveLater[]
+  suggestedReplacements: Replacement[]
+  updatedSurvivalEstimate: number | null
+  coachNote: string
+}
+
+function AIStrategyCoach({
+  picks, pool, simResult,
+}: {
+  picks: SurvivorPick[]
+  pool: Pool
+  simResult: SimResult | null
+}) {
+  const [running, setRunning] = useState(false)
+  const [review, setReview] = useState<StrategyReview | null>(null)
+  const [rawFallback, setRawFallback] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleAnalyze = async () => {
+    if (picks.length === 0) {
+      setError('Save at least one pick before running the AI coach.')
+      return
+    }
+    setRunning(true)
+    setError(null)
+    setReview(null)
+    setRawFallback(null)
+
+    // Build enriched picks with edge data
+    const enrichedPicks = picks.map((p) => {
+      const edge = MOCK_EDGE_TABLE.find((r) => r.team === p.team_name)
+      return {
+        round: p.round_number,
+        roundLabel: ROUND_LABEL[p.round_number] ?? `Round ${p.round_number}`,
+        teamName: p.team_name,
+        teamSeed: p.team_seed,
+        opponentName: p.opponent_name,
+        winProbability: edge?.winPct ?? p.win_probability,
+        survivorEV: edge?.survivorEV ?? null,
+        publicPickPct: edge?.publicPickPct ?? null,
+        futureValue: edge?.futureValue ?? null,
+        riskScore: edge?.riskScore ?? null,
+        aiScore: edge?.aiScore ?? p.survivor_value_score,
+        result: p.result,
+      }
+    })
+
+    const body = {
+      picks: enrichedPicks,
+      pool: {
+        pool_name: pool.pool_name,
+        pool_size: pool.pool_size,
+        pick_format: pool.pick_format,
+        strike_rule: pool.strike_rule,
+        team_reuse: pool.team_reuse,
+      },
+      ...(simResult
+        ? {
+            simResult: {
+              survivalProbability: simResult.survivalProbability,
+              mostCommonElimRound: simResult.mostCommonElimRound,
+              evVsPool: simResult.evVsPool,
+              bestPath: simResult.bestPath,
+            },
+          }
+        : {}),
+    }
+
+    try {
+      const res = await fetch('/api/survivor/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.error ?? 'Analysis failed. Please try again.')
+      } else if (data.review) {
+        setReview(data.review as StrategyReview)
+      } else if (data.raw) {
+        setRawFallback(data.raw)
+      }
+    } catch {
+      setError('Network error. Please try again.')
+    }
+    setRunning(false)
+  }
+
+  const probColor = (p: number) => p >= 60 ? '#00FFA3' : p >= 35 ? '#F59E0B' : '#FF6B6B'
+
+  return (
+    <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(167,139,250,0.25)' }}>
+      {/* Header */}
+      <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid rgba(255,255,255,0.07)', background: 'rgba(167,139,250,0.05)' }}>
+        <div>
+          <div className="flex items-center gap-2">
+            <Star className="w-4 h-4" style={{ color: '#A78BFA' }} />
+            <h3 className="font-black text-base" style={{ color: '#E6E6FA' }}>AI Strategy Coach</h3>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(167,139,250,0.15)', color: '#A78BFA', border: '1px solid rgba(167,139,250,0.3)' }}>
+              GPT-4o mini
+            </span>
+          </div>
+          <p className="text-xs mt-0.5" style={{ color: '#6B6B80' }}>
+            Reviews your picks and explains how to improve long-term survival odds
+          </p>
+        </div>
+        <button
+          onClick={handleAnalyze}
+          disabled={running || picks.length === 0}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-black transition-all hover:opacity-90 disabled:opacity-40 whitespace-nowrap"
+          style={{ background: 'linear-gradient(135deg, #A78BFA, #6D28D9)', color: '#fff' }}
+        >
+          <Star className={`w-4 h-4 ${running ? 'animate-pulse' : ''}`} />
+          {running ? 'Analyzing...' : 'Analyze My Survivor Strategy'}
+        </button>
+      </div>
+
+      {/* Empty state */}
+      {!review && !rawFallback && !error && !running && (
+        <div className="px-5 py-8 text-center">
+          <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(167,139,250,0.1)', border: '1px solid rgba(167,139,250,0.2)' }}>
+            <Star className="w-6 h-6" style={{ color: '#A78BFA' }} />
+          </div>
+          <p className="text-sm font-semibold mb-1" style={{ color: '#A0A0B0' }}>
+            {picks.length === 0 ? 'Save picks to unlock AI coaching' : 'Ready to review your strategy'}
+          </p>
+          <p className="text-xs" style={{ color: '#4A4A60' }}>
+            {picks.length === 0
+              ? 'Add at least one pick from the bracket or edge table.'
+              : `Click "Analyze My Survivor Strategy" above to get a personalized AI review of your ${picks.length} pick${picks.length !== 1 ? 's' : ''}.`}
+          </p>
+        </div>
+      )}
+
+      {/* Loading */}
+      {running && (
+        <div className="px-5 py-8 text-center">
+          <div className="flex items-center justify-center gap-3 mb-3">
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="w-2.5 h-2.5 rounded-full animate-bounce"
+                style={{ background: '#A78BFA', animationDelay: `${i * 0.15}s` }}
+              />
+            ))}
+          </div>
+          <p className="text-sm" style={{ color: '#A0A0B0' }}>AI is reviewing your survivor strategy…</p>
+        </div>
+      )}
+
+      {/* Error */}
+      {error && !running && (
+        <div className="px-5 py-4">
+          <div className="flex items-start gap-3 px-4 py-3 rounded-xl" style={{ background: 'rgba(255,107,107,0.08)', border: '1px solid rgba(255,107,107,0.2)' }}>
+            <Info className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: '#FF6B6B' }} />
+            <p className="text-sm" style={{ color: '#FF6B6B' }}>{error}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Raw fallback (JSON parse failed) */}
+      {rawFallback && !running && (
+        <div className="px-5 py-5">
+          <p className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#6B6B80' }}>AI Review</p>
+          <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: '#C0C0D0' }}>{rawFallback}</p>
+        </div>
+      )}
+
+      {/* Structured review */}
+      {review && !running && (
+        <div className="px-5 py-5 space-y-5">
+          {/* Survival probability header */}
+          <div className="grid grid-cols-2 gap-3">
+            {review.currentSurvivalProbability != null && (
+              <div className="rounded-xl p-4 text-center" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                <div className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: '#6B6B80' }}>Current Survival %</div>
+                <div className="text-3xl font-black" style={{ color: probColor(review.currentSurvivalProbability) }}>
+                  {review.currentSurvivalProbability}%
+                </div>
+              </div>
+            )}
+            {review.updatedSurvivalEstimate != null && (
+              <div className="rounded-xl p-4 text-center" style={{ background: 'rgba(0,255,163,0.05)', border: '1px solid rgba(0,255,163,0.18)' }}>
+                <div className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: '#00FFA3' }}>After AI Changes</div>
+                <div className="text-3xl font-black" style={{ color: '#00FFA3' }}>
+                  {review.updatedSurvivalEstimate}%
+                </div>
+                {review.currentSurvivalProbability != null && (
+                  <div className="text-xs mt-0.5 font-bold" style={{ color: '#00FFA3' }}>
+                    {review.updatedSurvivalEstimate - review.currentSurvivalProbability >= 0 ? '+' : ''}
+                    {(review.updatedSurvivalEstimate - review.currentSurvivalProbability).toFixed(1)}%
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Overall assessment */}
+          <div className="rounded-xl px-4 py-3" style={{ background: 'rgba(167,139,250,0.06)', border: '1px solid rgba(167,139,250,0.18)' }}>
+            <div className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: '#A78BFA' }}>Overall Assessment</div>
+            <p className="text-sm leading-relaxed" style={{ color: '#C0C0D0' }}>{review.overallAssessment}</p>
+          </div>
+
+          {/* Weak points */}
+          {review.weakPoints.length > 0 && (
+            <div>
+              <div className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#6B6B80' }}>Weak Points</div>
+              <div className="space-y-2">
+                {review.weakPoints.map((wp, i) => (
+                  <div key={i} className="flex items-start gap-3 px-4 py-3 rounded-xl"
+                    style={{ background: 'rgba(255,107,107,0.06)', border: '1px solid rgba(255,107,107,0.15)' }}>
+                    <div className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0" style={{ background: '#FF6B6B' }} />
+                    <div>
+                      <span className="text-sm font-bold" style={{ color: '#E6E6FA' }}>{wp.team}</span>
+                      <span className="text-xs ml-1.5" style={{ color: '#6B6B80' }}>{ROUND_LABEL[wp.round] ?? `Round ${wp.round}`}</span>
+                      <p className="text-xs mt-0.5" style={{ color: '#A0A0B0' }}>{wp.issue}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Save for later */}
+          {review.saveForLater.length > 0 && (
+            <div>
+              <div className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#6B6B80' }}>Save For Later</div>
+              <div className="space-y-2">
+                {review.saveForLater.map((s, i) => (
+                  <div key={i} className="flex items-start gap-3 px-4 py-3 rounded-xl"
+                    style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.18)' }}>
+                    <BookmarkCheck className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: '#F59E0B' }} />
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-bold" style={{ color: '#E6E6FA' }}>{s.team}</span>
+                        <span className="text-xs px-2 py-0.5 rounded-full font-bold"
+                          style={{ background: 'rgba(245,158,11,0.12)', color: '#F59E0B', border: '1px solid rgba(245,158,11,0.25)' }}>
+                          Better in {s.betterRound}
+                        </span>
+                      </div>
+                      <p className="text-xs mt-0.5" style={{ color: '#A0A0B0' }}>{s.reason}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Suggested replacements */}
+          {review.suggestedReplacements.length > 0 && (
+            <div>
+              <div className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#6B6B80' }}>Suggested Replacements</div>
+              <div className="space-y-3">
+                {review.suggestedReplacements.map((r, i) => (
+                  <div key={i} className="rounded-xl p-4"
+                    style={{ background: 'rgba(0,255,163,0.04)', border: '1px solid rgba(0,255,163,0.15)' }}>
+                    <div className="flex items-center gap-2 flex-wrap mb-2">
+                      <span className="text-sm font-bold line-through" style={{ color: '#6B6B80' }}>{r.replace}</span>
+                      <ChevronRight className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#6B6B80' }} />
+                      <span className="text-sm font-black" style={{ color: '#00FFA3' }}>{r.with}</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full font-bold ml-auto"
+                        style={{ background: 'rgba(0,255,163,0.1)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.25)' }}>
+                        {r.projectedImpact}
+                      </span>
+                    </div>
+                    <p className="text-xs" style={{ color: '#A0A0B0' }}>{r.reason}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Coach note */}
+          {review.coachNote && (
+            <div className="rounded-xl px-4 py-3 flex items-start gap-3"
+              style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <Star className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: '#A78BFA' }} />
+              <p className="text-xs italic leading-relaxed" style={{ color: '#A0A0B0' }}>{review.coachNote}</p>
+            </div>
+          )}
+
+          {/* Re-analyze button */}
+          <div className="flex justify-end">
+            <button
+              onClick={handleAnalyze}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all hover:opacity-80"
+              style={{ background: 'rgba(167,139,250,0.1)', border: '1px solid rgba(167,139,250,0.25)', color: '#A78BFA' }}
+            >
+              <RotateCcw className="w-3 h-3" /> Re-analyze
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── ShareCard ─────────────────────────────────────────────────────────────
 function ShareCard({ picks, poolName }: { picks: SurvivorPick[]; poolName: string }) {
   const cardRef = useRef<HTMLDivElement>(null)
@@ -1000,7 +1476,7 @@ function ShareCard({ picks, poolName }: { picks: SurvivorPick[]; poolName: strin
 
           {/* Footer */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 16, borderTop: '1px solid rgba(255,255,255,0.07)' }}>
-            <div style={{ color: '#4A4A60', fontSize: 11 }}>quantedge.ai · AI Survivor Pool Strategy</div>
+            <div style={{ color: '#4A4A60', fontSize: 11 }}>getquantedge.app · AI Survivor Pool Strategy</div>
             <div style={{ color: '#00FFA3', fontSize: 11, fontWeight: 700 }}>{roundedPicks.length} picks saved</div>
           </div>
         </div>
@@ -1790,6 +2266,8 @@ export default function SurvivorPage() {
   const [syncing, setSyncing] = useState(false)
   const [matchupSheet, setMatchupSheet] = useState<SelectedMatchup | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
+  const [pendingEvent, setPendingEvent] = useState<SurvivorEvent | null>(null)
+  const [lastSimResult, setLastSimResult] = useState<SimResult | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const effectiveBracketReleased = bracketReleased || testModeActive
@@ -1821,6 +2299,20 @@ export default function SurvivorPage() {
   }, [activePoolId])
 
   useEffect(() => { loadData() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Detect survivor events once picks + pool are loaded (fires each time activePool/picks change)
+  useEffect(() => {
+    if (!activePool || picks.length === 0) return
+    const event = detectSurvivorEvent(activePool, picks)
+    if (event) setPendingEvent(event)
+  }, [activePool, picks])
+
+  const dismissEvent = () => {
+    if (pendingEvent && activePool) {
+      markSeen(activePool.id, pendingEvent.type, pendingEvent.round)
+    }
+    setPendingEvent(null)
+  }
 
   const handleSelectPool = async (id: string) => {
     setActivePoolId(id)
@@ -2112,7 +2604,14 @@ export default function SurvivorPage() {
                   <ReservationTool usedTeams={usedTeams} />
 
                   {/* Simulation Panel */}
-                  <SimulationPanel picks={picks} />
+                  <SimulationPanel picks={picks} onResult={setLastSimResult} />
+
+                  {/* AI Strategy Coach */}
+                  <AIStrategyCoach
+                    picks={picks}
+                    pool={activePool}
+                    simResult={lastSimResult}
+                  />
 
                   {/* Share Card */}
                   {picks.length > 0 && (
@@ -2172,6 +2671,11 @@ export default function SurvivorPage() {
 
       {/* Inline Toast (fixed overlay) */}
       <InlineToast toast={toast} />
+
+      {/* Survivor event popup (shows once per event, dismissed permanently) */}
+      {pendingEvent && (
+        <EventPopup event={pendingEvent} onDismiss={dismissEvent} />
+      )}
     </div>
   )
 }
