@@ -161,8 +161,17 @@ export async function GET() {
     }
   }
 
+  // Last engine run timestamp — used by the dashboard "Last Updated" label
+  const { data: lastRun } = await supabaseAdmin
+    .from('engine_runs')
+    .select('run_at')
+    .order('run_at', { ascending: false })
+    .limit(1)
+    .single()
+
   return NextResponse.json({
     isPremium,
+    lastUpdated: lastRun?.run_at ?? null,
     last_7_days: {
       record: formatRecord(last7Record),
       wins: last7Record.wins,

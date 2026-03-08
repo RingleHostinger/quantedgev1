@@ -197,7 +197,7 @@ function BracketPlaceholder() {
 }
 
 // ─── Pool setup form ───────────────────────────────────────────────────────
-function PoolSetupForm({ onSave }: { onSave: (config: PoolConfig) => void }) {
+function PoolSetupForm({ onSave }: { onSave: (config: PoolConfig, savedPool?: Record<string, unknown>) => void }) {
   const [config, setConfig] = useState<PoolConfig>({
     pool_name: 'My Survivor Pool',
     pool_size: 'small',
@@ -215,8 +215,10 @@ function PoolSetupForm({ onSave }: { onSave: (config: PoolConfig) => void }) {
   const handleSave = async () => {
     setSaving(true)
     try {
-      await fetch('/api/survivor', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) })
-      onSave(config)
+      const res = await fetch('/api/survivor', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) })
+      const data = res.ok ? await res.json() : null
+      // Pass back the server's pool object (contains the real id) alongside local config
+      onSave(config, data?.pool ?? undefined)
     } finally { setSaving(false) }
   }
 
@@ -909,10 +911,17 @@ export default function SurvivorPage() {
     setUsedTeams((prev) => [...prev.filter((t) => t !== teamName), teamName])
   }
 
-  const handlePoolSave = (config: PoolConfig) => {
-    setPool({ ...(pool || {}), ...config })
+  const handlePoolSave = (config: PoolConfig, savedPool?: Record<string, unknown>) => {
+    // Prefer the server-returned pool (has real id) — fall back to merging local config
+    if (savedPool) {
+      setPool(savedPool)
+    } else {
+      setPool((prev) => ({ ...(prev || {}), ...config }))
+    }
     setShowSetup(false)
-    loadData()
+    // Picks are always empty right after pool creation — no need to refetch
+    setPicks([])
+    setUsedTeams([])
   }
 
   if (loading) return (

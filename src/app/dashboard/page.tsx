@@ -96,7 +96,7 @@ export default function DashboardPage() {
       setIsPremium(edgeData.isPremium ?? false)
       setGames((predData.predictions || []).slice(0, 5))
       setPerf(perfData)
-      setPerfUpdatedAt(new Date().toISOString())
+      setPerfUpdatedAt(perfData.lastUpdated ?? null)
       setLoading(false)
     }).catch(() => setLoading(false))
   }, [])
@@ -160,7 +160,7 @@ export default function DashboardPage() {
         </div>
         {perfUpdatedAt && (
           <p className="text-[11px] mt-2" style={{ color: '#4A4A60' }}>
-            Last Updated: {new Date(perfUpdatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} &middot; Odds Refresh: Hourly
+            Last Updated: {new Date(perfUpdatedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} &middot; Odds Refresh: Hourly
           </p>
         )}
       </div>

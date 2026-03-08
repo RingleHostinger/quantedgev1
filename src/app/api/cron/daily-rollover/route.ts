@@ -1,37 +1,34 @@
 /**
  * POST /api/cron/daily-rollover
  *
- * Runs once per day at 2:00 AM EST (07:00 UTC) via Vercel Cron.
+ * Daily cron — runs once at 2:00 AM EST (07:00 UTC) via Vercel Cron.
+ * Schedule: 0 7 * * *
  *
- * ⚠️  TEMPORARILY DISABLED (Vercel Hobby plan — only one daily cron allowed)
+ * Responsibilities (daily at 2 AM EST):
+ *   1. Fetch final scores for any overnight games that finished late
+ *   2. Final grading pass — grade all picks with now-final scores
+ *   3. Archive previous slate (getTodaySlateRange shifts automatically at 2 AM ET)
+ *   4. Load new day's official picks from fresh prediction_cache
+ *   5. Log run to engine_runs
  *
- * To re-enable when upgrading to Vercel Pro:
- *   1. Add back to vercel.json:
- *        { "path": "/api/cron/daily-rollover", "schedule": "0 7 * * *" }
- *   2. Also re-add /api/cron/odds-refresh for hourly refreshes.
- *   3. Remove /api/cron/daily-full from vercel.json (it was the Hobby consolidation).
- *
- * Steps performed:
- *   1. Grade all pending official picks whose games have a final score.
- *   2. Update closing lines for picks nearing game time.
- *   3. Log the rollover in engine_runs (so the data freshness indicator knows).
- *
- * After this runs, the slate filter in getTodaySlateRange() automatically
- * shifts the active window to the new day — no additional DB changes needed.
+ * Note: Ongoing hourly odds refresh, CLV capture, score fetching, and pick grading
+ * run via /api/cron/odds-refresh (0 * * * *). This job handles daily rollover only.
  *
  * Security: Requires either a valid admin session OR the CRON_SECRET header/bearer token.
+ * Vercel Cron sends: Authorization: Bearer <CRON_SECRET>
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { supabaseAdmin } from '@/integrations/supabase/server'
+import { fetchAndUpdateGameScores } from '@/lib/oddsCacheService'
 import {
   resolveOfficialPickResults,
-  updateClosingLines,
+  replaceOfficialPicksForDay,
 } from '@/lib/officialPicksService'
+import { getTodaySlateRange } from '@/lib/slateUtils'
 
 async function isAuthorized(req: NextRequest): Promise<boolean> {
-  // Option 1: valid admin session
   const session = await getSession()
   if (session?.userId) {
     const { data } = await supabaseAdmin
@@ -42,7 +39,6 @@ async function isAuthorized(req: NextRequest): Promise<boolean> {
     if (data?.role === 'admin') return true
   }
 
-  // Option 2: CRON_SECRET header (for Vercel Cron or external callers)
   const cronSecret = process.env.CRON_SECRET
   if (cronSecret) {
     const header =
@@ -60,63 +56,100 @@ export async function POST(req: NextRequest) {
   }
 
   const startMs = Date.now()
-  console.log('[daily-rollover] Starting daily rollover at', new Date().toISOString())
+  const runAt = new Date().toISOString()
+  console.log('[daily-rollover] Starting daily rollover at', runAt)
 
-  // Step 1: Capture closing lines for picks approaching game time
-  const closingResult = await updateClosingLines()
-  console.log('[daily-rollover] Closing lines updated:', closingResult)
-
-  // Step 2: Grade all pending official picks that have final scores
-  const gradeResult = await resolveOfficialPickResults()
-  console.log('[daily-rollover] Picks graded:', gradeResult)
-
-  // Step 3: Update model performance stats (win/loss totals)
-  let statsResult: { wins: number; losses: number; pushes: number } | null = null
+  // ── Step 1: Fetch final scores for late-finishing games ───────────────────
+  // Run before grading so picks from overnight games can be resolved.
+  let scoresResult: { updated: number; errors: string[] } = { updated: 0, errors: [] }
   try {
-    const { data: resolvedPicks } = await supabaseAdmin
-      .from('official_picks')
-      .select('result')
-      .in('result', ['win', 'loss', 'push'])
-
-    if (resolvedPicks) {
-      const wins = resolvedPicks.filter((p) => p.result === 'win').length
-      const losses = resolvedPicks.filter((p) => p.result === 'loss').length
-      const pushes = resolvedPicks.filter((p) => p.result === 'push').length
-      statsResult = { wins, losses, pushes }
-      console.log('[daily-rollover] Model performance stats:', statsResult)
-    }
+    scoresResult = await fetchAndUpdateGameScores()
+    console.log('[daily-rollover] Scores updated:', scoresResult)
   } catch (err) {
-    console.warn('[daily-rollover] Could not compute stats:', err)
+    console.warn('[daily-rollover] Score fetch error:', err)
+    scoresResult = { updated: 0, errors: [String(err)] }
   }
 
+  // ── Step 2: Final grading pass ─────────────────────────────────────────────
+  // Grade all pending picks that now have final scores.
+  let gradingResult: { resolved: number; errors: string[] } = { resolved: 0, errors: [] }
+  try {
+    gradingResult = await resolveOfficialPickResults()
+    console.log('[daily-rollover] Picks graded:', gradingResult)
+  } catch (err) {
+    console.warn('[daily-rollover] Grading error:', err)
+    gradingResult = { resolved: 0, errors: [String(err)] }
+  }
+
+  // ── Step 3 + 4: Load new day's official picks ─────────────────────────────
+  // getTodaySlateRange() already reflects the new sports day (2 AM ET boundary
+  // has just passed), so this correctly targets the new day's window.
+  let picksResult: { inserted: number; skipped: number; errors: string[] } = {
+    inserted: 0,
+    skipped: 0,
+    errors: [],
+  }
+  try {
+    const { start, end } = getTodaySlateRange()
+    picksResult = await replaceOfficialPicksForDay(start, end)
+    console.log('[daily-rollover] New day picks loaded:', picksResult)
+  } catch (err) {
+    console.warn('[daily-rollover] Pick load error:', err)
+    picksResult = { inserted: 0, skipped: 0, errors: [String(err)] }
+  }
+
+  // ── Step 5: Log run ────────────────────────────────────────────────────────
   const durationMs = Date.now() - startMs
+  try {
+    await supabaseAdmin.from('engine_runs').insert({
+      run_at: runAt,
+      trigger: 'cron_daily_rollover',
+      duration_ms: durationMs,
+      games_processed: scoresResult.updated,
+      predictions_generated: picksResult.inserted,
+      notes: JSON.stringify({
+        scoresUpdated: scoresResult.updated,
+        picksGraded: gradingResult.resolved,
+        newPicksInserted: picksResult.inserted,
+        newPicksSkipped: picksResult.skipped,
+      }),
+    })
+  } catch (logErr) {
+    console.warn('[daily-rollover] Failed to log to engine_runs:', logErr)
+  }
+
+  console.log('[daily-rollover] Completed in', durationMs, 'ms')
 
   return NextResponse.json({
     success: true,
     durationMs,
-    closingLines: closingResult,
-    grading: gradeResult,
-    modelStats: statsResult,
-    rolledOverAt: new Date().toISOString(),
+    runAt,
+    scores: scoresResult,
+    grading: gradingResult,
+    picks: picksResult,
   })
 }
 
-// Vercel Cron also uses GET for health checks — return status
 export async function GET(req: NextRequest) {
   if (!(await isAuthorized(req))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { data: pendingRows } = await supabaseAdmin
+  const { data: pendingPicks } = await supabaseAdmin
     .from('official_picks')
     .select('id')
     .eq('result', 'pending')
-  const pendingCount = (pendingRows ?? []).length
+
+  const { start, end } = getTodaySlateRange()
 
   return NextResponse.json({
     endpoint: '/api/cron/daily-rollover',
     schedule: '0 7 * * *',
-    description: 'Grades yesterday picks and rolls slate to new day (2 AM EST)',
-    pendingPicksToGrade: pendingCount,
+    description: [
+      'Daily 2 AM EST: fetches overnight scores, grades pending picks,',
+      'then loads fresh official picks for the new sports day.',
+    ].join(' '),
+    pendingPicksToGrade: (pendingPicks ?? []).length,
+    currentSlate: { start, end },
   })
 }

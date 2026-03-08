@@ -74,10 +74,17 @@ export async function syncOddsToGamesAndPredictions(): Promise<SyncResult> {
   let predictionsGenerated = 0
   let predictionsUpdated = 0
 
-  // Step 1: Fetch all cached odds
+  // Step 1: Fetch cached odds — only games that start within the next 48 hours
+  // (or started in the last 4 hours to handle in-progress games).
+  // This prevents stale previous-day rows from being re-synced as 'scheduled'.
+  const syncCutoffPast = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString()
+  const syncCutoffFuture = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString()
+
   const { data: oddsRows, error: oddsError } = await supabaseAdmin
     .from('cached_odds')
     .select('*')
+    .gte('commence_time', syncCutoffPast)
+    .lt('commence_time', syncCutoffFuture)
     .order('last_updated', { ascending: false })
 
   if (oddsError || !oddsRows) {
@@ -99,25 +106,42 @@ export async function syncOddsToGamesAndPredictions(): Promise<SyncResult> {
   }
 
   // Step 3: Build game rows to upsert
+  // First, check which game_ids already exist in DB with a final/completed status
+  // so we don't overwrite them back to 'scheduled' during the odds sync.
+  const allOddsGameIds = Array.from(byGameId.keys())
+  const { data: existingGames } = await supabaseAdmin
+    .from('games')
+    .select('odds_game_id, status')
+    .in('odds_game_id', allOddsGameIds)
+  const finalGameIds = new Set(
+    (existingGames ?? [])
+      .filter((g) => g.status === 'final' || g.status === 'completed')
+      .map((g) => g.odds_game_id)
+  )
+
   const gameRows: Record<string, unknown>[] = []
   for (const [gameId, rows] of byGameId) {
     const best = pickBestRow(rows)
     const league = (best.league as string) || 'NBA'
     const sport = LEAGUE_TO_SPORT[league] || 'Basketball'
 
-    gameRows.push({
+    // Preserve 'final'/'completed' status — do not overwrite with 'scheduled'
+    const status = finalGameIds.has(gameId) ? undefined : 'scheduled'
+
+    const row: Record<string, unknown> = {
       odds_game_id:            gameId,
       home_team_name:          best.home_team as string,
       away_team_name:          best.away_team as string,
       sport,
       league,
       scheduled_at:            best.commence_time as string,
-      status:                  'scheduled',
       sportsbook_spread:       best.spread ?? null,
       sportsbook_total:        best.total ?? null,
       sportsbook_moneyline_home: best.moneyline_home ?? null,
       sportsbook_moneyline_away: best.moneyline_away ?? null,
-    })
+    }
+    if (status !== undefined) row.status = status
+    gameRows.push(row)
   }
 
   if (!gameRows.length) {
@@ -192,32 +216,62 @@ export async function syncOddsToGamesAndPredictions(): Promise<SyncResult> {
       // near the sportsbook line. This prevents large total edges from being model
       // scale artifacts (e.g. NCAAB model always outputs 145 while book says 165).
       // We preserve the AI home/away ratio (spread direction) but rescale the total
-      // to be within ±8 of the sportsbook total using the AI's score ratio as signal.
+      // to be within a league-appropriate band using the AI's score ratio as signal.
       const sbTotal = game.sportsbook_total
+      const league = game.league || 'NBA'
+      const isNHL = league === 'NHL'
+      const isSoccer = league === 'EPL' || league === 'UCL'
+      const isMLB = league === 'MLB'
+
+      // League-aware total anchor limits
+      const totalMaxDeviation = isNHL ? 0.5 : isSoccer ? 0.4 : isMLB ? 0.5 : 8
+
       if (sbTotal != null && prediction.aiTotal > 0) {
         const ratio = prediction.predictedHomeScore / (prediction.predictedHomeScore + prediction.predictedAwayScore)
-        // AI total adjustment: ±8 max, driven by model efficiency signals
         const modelRatio = prediction.aiTotal / (storedLine.total ?? prediction.aiTotal)
-        const aiAdjustment = Math.max(-8, Math.min(8, (modelRatio - 1) * sbTotal))
+        const aiAdjustment = Math.max(-totalMaxDeviation, Math.min(totalMaxDeviation, (modelRatio - 1) * sbTotal))
         const anchoredTotal = Math.round((sbTotal + aiAdjustment) * 10) / 10
-        prediction.predictedHomeScore = Math.round(anchoredTotal * ratio)
-        prediction.predictedAwayScore = Math.round(anchoredTotal * (1 - ratio))
+        prediction.predictedHomeScore = Math.round(anchoredTotal * ratio * 10) / 10
+        prediction.predictedAwayScore = Math.round(anchoredTotal * (1 - ratio) * 10) / 10
         prediction.aiTotal = parseFloat(anchoredTotal.toFixed(1))
         prediction.totalEdge = parseFloat((anchoredTotal - sbTotal).toFixed(1))
       }
 
-      // When a sportsbook spread exists, anchor AI spread to be within ±6 of the book.
-      // This prevents the model's spread from being wildly off from the market.
+      // When a sportsbook spread exists, anchor AI spread to within a league-aware
+      // deviation. NHL uses a fixed ±1.5 puck line — the model must stay close to
+      // that market norm. Other sports use a wider ±6 default.
       const sbSpread = game.sportsbook_spread
+
       if (sbSpread != null) {
         const rawSpread = prediction.aiSpread
-        const maxDeviation = 6
+
+        let maxDeviation: number
+        if (isNHL) {
+          // NHL puck lines are always ±1.5 — only allow ±0.3 deviation from the book
+          maxDeviation = 0.3
+        } else if (isSoccer || isMLB) {
+          // Soccer/MLB have tight lines too
+          maxDeviation = 1.0
+        } else {
+          // NBA, NFL, NCAAB — wider spread variance
+          maxDeviation = 6
+        }
+
         const clampedSpread = Math.max(
           sbSpread - maxDeviation,
           Math.min(sbSpread + maxDeviation, rawSpread)
         )
         prediction.aiSpread = parseFloat(clampedSpread.toFixed(1))
-        prediction.spreadEdge = parseFloat((Math.abs(prediction.aiSpread) - Math.abs(sbSpread)).toFixed(1))
+
+        if (isNHL) {
+          // For NHL, spread edge is not meaningful (puck line is always fixed at ±1.5).
+          // Instead, express the edge as the probability gap: (AI win prob - implied prob).
+          // This is calculated after the moneyline blend below, so we'll set it to null
+          // here and recalculate it post-blend using the probability difference.
+          prediction.spreadEdge = null
+        } else {
+          prediction.spreadEdge = parseFloat((Math.abs(prediction.aiSpread) - Math.abs(sbSpread)).toFixed(1))
+        }
       }
 
       // Blend AI win probabilities with moneyline-implied probs (50/50 weight)
@@ -232,6 +286,24 @@ export async function syncOddsToGamesAndPredictions(): Promise<SyncResult> {
         prediction.awayWinProbability = Math.round(
           (prediction.awayWinProbability * 0.5 + normalAway * 100 * 0.5) * 10
         ) / 10
+      }
+
+      // For NHL: express the spread edge as a moneyline probability gap (scaled to
+      // spread-equivalent units so edge tier thresholds work comparably).
+      // 1% probability gap ≈ 0.3 spread points in hockey context.
+      if (isNHL && impliedHome != null && impliedAway != null) {
+        const totalImplied = impliedHome + impliedAway
+        const normalHome = impliedHome / totalImplied
+        const normalAway = impliedAway / totalImplied
+        const aiHomeProb = prediction.homeWinProbability / 100
+        const aiAwayProb = prediction.awayWinProbability / 100
+        // Use the larger of home/away probability edge, convert to spread-equivalent
+        const probGap = Math.max(
+          Math.abs(aiHomeProb - normalHome),
+          Math.abs(aiAwayProb - normalAway)
+        )
+        // Scale: 5% prob gap → ~1.5 edge points (meaningful for edge tier detection)
+        prediction.spreadEdge = parseFloat((probGap * 30).toFixed(1))
       }
 
       // Recalculate edge tiers with calibrated edges

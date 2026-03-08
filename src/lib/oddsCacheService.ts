@@ -291,6 +291,15 @@ async function upsertOdds(games: OddsApiGame[], sportKey: string): Promise<numbe
   const now = new Date().toISOString()
   let upserted = 0
 
+  // Delete all existing cached rows for this sport before inserting fresh data.
+  // This ensures stale games from previous days (e.g. yesterday's NBA slate) do
+  // not linger in the cache when a new slate is fetched — preventing old game_ids
+  // from being carried forward into the games table and official picks.
+  await supabaseAdmin
+    .from('cached_odds')
+    .delete()
+    .eq('league', meta.league)
+
   const rows = games.flatMap(game => {
     const bm = pickBookmaker(game.bookmakers)
     if (!bm) return []
@@ -386,8 +395,14 @@ export async function refreshOddsCache(): Promise<RefreshResult> {
           sportsRefreshed.push(sportKey)
           console.info(`[oddsCacheService] ${sportKey}: fetched=${games.length} upserted=${upserted}`)
         } else {
+          // No games returned — purge any stale rows for this sport so yesterday's
+          // games don't persist in the cache and contaminate today's predictions.
+          const meta = SPORT_MAP[sportKey]
+          if (meta) {
+            await supabaseAdmin.from('cached_odds').delete().eq('league', meta.league)
+            console.info(`[oddsCacheService] ${sportKey}: 0 games — purged stale cache rows`)
+          }
           sportsSkipped.push(sportKey)
-          console.info(`[oddsCacheService] ${sportKey}: 0 games (off-season / no events)`)
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
