@@ -361,16 +361,32 @@ export default function DashboardPage() {
             <BarChart2 className="w-4 h-4" style={{ color: '#3B82F6' }} />
             <h2 className="text-sm font-bold" style={{ color: '#E6E6FA' }}>Upcoming Games</h2>
           </div>
-          <Link href="/dashboard/picks"
-            className="text-xs font-semibold flex items-center gap-0.5 hover:underline"
-            style={{ color: '#3B82F6' }}>
-            View All <ChevronRight className="w-3.5 h-3.5" />
-          </Link>
+          {isPremium && (
+            <Link href="/dashboard/picks"
+              className="text-xs font-semibold flex items-center gap-0.5 hover:underline"
+              style={{ color: '#3B82F6' }}>
+              View All <ChevronRight className="w-3.5 h-3.5" />
+            </Link>
+          )}
         </div>
 
         {loading ? (
           <div className="space-y-2">
             {[1, 2, 3].map(i => <div key={i} className="h-12 rounded-xl animate-pulse" style={{ background: 'rgba(255,255,255,0.04)' }} />)}
+          </div>
+        ) : !isPremium ? (
+          <div className="rounded-2xl p-6 text-center"
+            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+            <p className="text-sm font-bold mb-1" style={{ color: '#E6E6FA' }}>🔒 Premium Feature</p>
+            <p className="text-xs mb-4" style={{ color: '#6B6B80' }}>
+              Upcoming game data including Book vs AI spreads and win probabilities is available to Premium subscribers.
+            </p>
+            <Link href="/dashboard/pricing">
+              <button className="px-5 py-2 rounded-xl text-xs font-bold transition-all hover:opacity-90"
+                style={{ background: 'rgba(0,255,163,0.15)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.3)' }}>
+                Upgrade to Premium
+              </button>
+            </Link>
           </div>
         ) : games.length === 0 ? (
           <div className="rounded-xl px-4 py-5 text-center"
@@ -423,7 +439,7 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {games.length > 0 && (
+        {isPremium && games.length > 0 && (
           <Link href="/dashboard/picks">
             <button className="w-full mt-3 py-2 rounded-xl text-xs font-semibold transition-all hover:opacity-80"
               style={{ background: 'rgba(255,255,255,0.05)', color: '#A0A0B0', border: '1px solid rgba(255,255,255,0.08)' }}>

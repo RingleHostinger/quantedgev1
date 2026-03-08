@@ -30,7 +30,8 @@ export async function POST(req: NextRequest) {
 
   const { error } = await supabaseAdmin
     .from('admin_settings')
-    .upsert({ key: 'survivor_test_mode', value: enabled ? 'true' : 'false', updated_at: new Date().toISOString() })
+    .update({ value: enabled ? 'true' : 'false', updated_at: new Date().toISOString() })
+    .eq('key', 'survivor_test_mode')
 
   if (error) {
     return NextResponse.json({ error: 'Failed to update setting' }, { status: 500 })

@@ -925,6 +925,36 @@ export default function SurvivorPage() {
     </div>
   )
 
+  // Free users are fully locked out of Survivor Pool AI
+  if (!isPremium) return (
+    <div className="p-6 max-w-4xl mx-auto">
+      <div className="flex items-center gap-2 mb-8">
+        <Trophy className="w-5 h-5" style={{ color: '#F59E0B' }} />
+        <h1 className="text-2xl font-black" style={{ color: '#E6E6FA' }}>QuantEdge Survivor Pool Assistant</h1>
+      </div>
+      <div className="rounded-2xl p-10 text-center"
+        style={{ background: 'linear-gradient(135deg, rgba(245,158,11,0.08), rgba(251,191,36,0.04))', border: '1px solid rgba(245,158,11,0.25)' }}>
+        <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5"
+          style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.25)' }}>
+          <Trophy className="w-8 h-8" style={{ color: '#F59E0B' }} />
+        </div>
+        <h2 className="text-xl font-black mb-2" style={{ color: '#E6E6FA' }}>Survivor Pool AI</h2>
+        <p className="text-sm mb-1 font-semibold" style={{ color: '#F59E0B' }}>Madness Special or Premium Plan Required</p>
+        <p className="text-sm mb-6 max-w-md mx-auto" style={{ color: '#A0A0B0' }}>
+          The Survivor Pool AI — including the Edge Table, AI pick recommendations, and Future Round Reservation Tool — is available on the Madness Special plan ($19.99/mo) or Premium plan ($39.99/mo).
+        </p>
+        <div className="flex flex-col sm:flex-row gap-3 justify-center">
+          <Link href="/dashboard/pricing">
+            <button className="px-6 py-2.5 rounded-xl text-sm font-bold transition-all hover:opacity-90"
+              style={{ background: 'rgba(245,158,11,0.15)', color: '#F59E0B', border: '1px solid rgba(245,158,11,0.3)' }}>
+              View Plans
+            </button>
+          </Link>
+        </div>
+      </div>
+    </div>
+  )
+
   return (
     <div className="p-6 max-w-4xl mx-auto">
       {/* Header */}

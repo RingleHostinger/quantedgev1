@@ -271,8 +271,8 @@ export default function HeatmapPage() {
       .catch(() => setLoading(false))
   }, [])
 
-  const visibleRows = isPremium ? rows : rows.slice(0, 3)
-  const lockedCount = isPremium ? 0 : Math.max(0, rows.length - 3)
+  const visibleRows = isPremium ? rows : []
+  const lockedCount = isPremium ? 0 : rows.length
 
   const searchItems = useMemo<GameSearchItem[]>(() =>
     rows.map((r) => ({
@@ -394,10 +394,10 @@ export default function HeatmapPage() {
                 <Lock className="w-5 h-5 flex-shrink-0" style={{ color: '#A0A0B0' }} />
                 <div>
                   <p className="text-sm font-semibold" style={{ color: '#E6E6FA' }}>
-                    {lockedCount} more game{lockedCount !== 1 ? 's' : ''} locked
+                    Premium feature — {lockedCount} game{lockedCount !== 1 ? 's' : ''} available
                   </p>
                   <p className="text-xs" style={{ color: '#A0A0B0' }}>
-                    Premium members see the full heat map with all qualifying games
+                    Upgrade to see the full heat map with all qualifying games and edges
                   </p>
                 </div>
               </div>
@@ -411,10 +411,12 @@ export default function HeatmapPage() {
           )}
 
           {/* Footer note */}
-          <p className="text-xs text-center" style={{ color: '#4A4A60' }}>
-            Showing {visibleRows.length} game{visibleRows.length !== 1 ? 's' : ''} with |edge| ≥ 1 ·
-            Public betting split data coming soon
-          </p>
+          {isPremium && (
+            <p className="text-xs text-center" style={{ color: '#4A4A60' }}>
+              Showing {visibleRows.length} game{visibleRows.length !== 1 ? 's' : ''} with |edge| ≥ 1 ·
+              Public betting split data coming soon
+            </p>
+          )}
         </>
       )}
     </div>
