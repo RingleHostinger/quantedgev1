@@ -4,9 +4,12 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   Trophy, Clock, Star, CheckCircle, ChevronRight, Zap, RotateCcw, Shield,
   ArrowUpDown, ArrowUp, ArrowDown, TrendingUp, BookmarkCheck, Info, FlaskConical,
-  Plus, Trash2, ChevronDown,
+  Plus, Trash2, ChevronDown, Download, Share2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle,
+} from '@/components/ui/sheet'
 import Link from 'next/link'
 
 // ─── Selection Sunday: March 16, 2026 at 6:00 PM EST ──────────────────────
@@ -437,8 +440,199 @@ function RoundSelector({
   )
 }
 
+// ─── MatchupSheet ──────────────────────────────────────────────────────────
+interface SelectedMatchup {
+  game: BracketGame
+  region: string
+}
+
+function MatchupSheet({
+  matchup, open, onClose, picks, usedTeams, isPremium, onPickTeam, selectedRound,
+}: {
+  matchup: SelectedMatchup | null
+  open: boolean
+  onClose: () => void
+  picks: SurvivorPick[]
+  usedTeams: string[]
+  isPremium: boolean
+  onPickTeam: (team: string, round: number) => Promise<void>
+  selectedRound: number
+}) {
+  const [picking, setPicking] = useState<string | null>(null)
+
+  if (!matchup) return null
+  const { game, region } = matchup
+
+  const getEdge = (team: string) => MOCK_EDGE_TABLE.find((r) => r.team === team)
+
+  const TeamPanel = ({ slot, isTop }: { slot: BracketSlot; isTop: boolean }) => {
+    const edge = getEdge(slot.team)
+    const isPicked = usedTeams.includes(slot.team)
+    const existingPick = picks.find((p) => p.team_name === slot.team)
+    const winPct = edge?.winPct ?? (isTop ? 65 : 35)
+    const publicPct = edge?.publicPickPct ?? 0
+    const ev = edge?.survivorEV ?? 0
+    const ai = edge?.aiScore ?? 0
+    const futureVal = edge?.futureValue ?? 0
+
+    const barColor = winPct >= 90 ? '#00FFA3' : winPct >= 75 ? '#F59E0B' : '#FF6B6B'
+
+    const handlePick = async () => {
+      setPicking(slot.team)
+      await onPickTeam(slot.team, selectedRound)
+      setPicking(null)
+      onClose()
+    }
+
+    return (
+      <div className="rounded-2xl p-4 mb-3" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.09)' }}>
+        {/* Team header */}
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-xs font-black px-2 py-0.5 rounded-full" style={{ background: 'rgba(255,255,255,0.08)', color: '#6B6B80' }}>
+            #{slot.seed}
+          </span>
+          <span className="font-black text-base flex-1" style={{ color: '#E6E6FA' }}>{slot.team}</span>
+          <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(255,255,255,0.06)', color: '#A0A0B0' }}>{region}</span>
+        </div>
+
+        {/* Win probability bar */}
+        <div className="mb-3">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs" style={{ color: '#6B6B80' }}>Win Probability</span>
+            <span className="text-sm font-black" style={{ color: barColor }}>{winPct}%</span>
+          </div>
+          <div className="h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+            <div className="h-full rounded-full transition-all" style={{ width: `${winPct}%`, background: barColor }} />
+          </div>
+        </div>
+
+        {/* Stats grid */}
+        <div className="grid grid-cols-3 gap-2 mb-3">
+          {[
+            { label: 'Public %', value: `${publicPct}%`, color: publicPct >= 30 ? '#FF6B6B' : '#A0A0B0' },
+            { label: 'Survivor EV', value: `+${ev}%`, color: ev >= 8 ? '#00FFA3' : ev >= 5 ? '#F59E0B' : '#A0A0B0' },
+            { label: 'AI Score', value: String(ai), color: ai >= 88 ? '#00FFA3' : ai >= 75 ? '#F59E0B' : '#A0A0B0' },
+          ].map(({ label, value, color }) => (
+            <div key={label} className="text-center rounded-xl py-2.5" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+              <div className="text-sm font-black" style={{ color }}>{value}</div>
+              <div className="text-[10px] mt-0.5" style={{ color: '#4A4A60' }}>{label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Future value */}
+        {edge && (
+          <div className="flex items-center gap-3 px-3 py-2 rounded-xl mb-3" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+            <TrendingUp className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#A78BFA' }} />
+            <span className="text-xs" style={{ color: '#A0A0B0' }}>Future value: </span>
+            <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+              <div className="h-full rounded-full" style={{ width: `${futureVal}%`, background: futureVal >= 80 ? '#00FFA3' : '#F59E0B' }} />
+            </div>
+            <span className="text-xs font-bold" style={{ color: '#A0A0B0' }}>{futureVal}</span>
+          </div>
+        )}
+
+        {/* Premium reasoning blur */}
+        {!isPremium && edge && (
+          <div className="rounded-xl p-3 mb-3 relative overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', minHeight: 56 }}>
+            <p className="text-xs leading-relaxed" style={{ color: '#C0C0D0', filter: 'blur(3px)', userSelect: 'none' }}>
+              This team offers strong survivor value due to low public ownership and a favorable path through the bracket with limited elite opponents until the Elite 8.
+            </p>
+            <div className="absolute inset-0 flex items-center justify-center gap-1.5">
+              <Star className="w-3.5 h-3.5" style={{ color: '#00FFA3' }} />
+              <span className="text-xs font-bold" style={{ color: '#E6E6FA' }}>Premium — AI Reasoning</span>
+            </div>
+          </div>
+        )}
+        {isPremium && edge && (
+          <div className="rounded-xl p-3 mb-3" style={{ background: 'rgba(0,255,163,0.04)', border: '1px solid rgba(0,255,163,0.12)' }}>
+            <p className="text-xs leading-relaxed" style={{ color: '#C0C0D0' }}>
+              {slot.team} (#{slot.seed}) offers contrarian survivor value with {winPct}% win probability and only {publicPct}% public ownership — generating +{ev}% EV vs pool.
+            </p>
+          </div>
+        )}
+
+        {/* Pick button */}
+        {isPicked ? (
+          <div className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl"
+            style={{ background: 'rgba(0,255,163,0.08)', border: '1px solid rgba(0,255,163,0.2)' }}>
+            <CheckCircle className="w-4 h-4" style={{ color: '#00FFA3' }} />
+            <span className="text-sm font-bold" style={{ color: '#00FFA3' }}>
+              Pick Saved {existingPick ? `· R${existingPick.round_number}` : ''}
+            </span>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <button
+              onClick={handlePick}
+              disabled={picking === slot.team}
+              className="flex-1 py-2.5 rounded-xl text-sm font-black transition-all hover:opacity-90"
+              style={{ background: 'linear-gradient(135deg, #00FFA3, #00D4FF)', color: '#000' }}
+            >
+              {picking === slot.team ? 'Saving...' : 'Pick This Team'}
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={(v) => { if (!v) onClose() }}>
+      <SheetContent
+        side="right"
+        className="w-full sm:max-w-md overflow-y-auto"
+        style={{ background: '#0F0F1A', borderLeft: '1px solid rgba(255,255,255,0.1)' }}
+      >
+        <SheetHeader className="mb-5">
+          <SheetTitle style={{ color: '#E6E6FA' }}>
+            <div className="flex items-center gap-2">
+              <Trophy className="w-4 h-4" style={{ color: '#F59E0B' }} />
+              <span>{region} Region Matchup</span>
+            </div>
+          </SheetTitle>
+          <p className="text-xs" style={{ color: '#6B6B80' }}>
+            Click "Pick This Team" to save your survivor pick for {ROUND_LABEL[selectedRound]}.
+          </p>
+        </SheetHeader>
+
+        {/* VS divider */}
+        <div className="relative mb-3">
+          <div className="absolute inset-x-0 top-1/2 h-px" style={{ background: 'rgba(255,255,255,0.07)' }} />
+          <div className="relative flex justify-center">
+            <span className="px-3 text-xs font-black" style={{ background: '#0F0F1A', color: '#6B6B80' }}>MATCHUP</span>
+          </div>
+        </div>
+
+        <TeamPanel slot={game.top} isTop={true} />
+
+        <div className="relative my-3">
+          <div className="absolute inset-x-0 top-1/2 h-px" style={{ background: 'rgba(255,255,255,0.07)' }} />
+          <div className="relative flex justify-center">
+            <span className="px-3 text-xs font-black" style={{ background: '#0F0F1A', color: '#6B6B80' }}>VS</span>
+          </div>
+        </div>
+
+        <TeamPanel slot={game.bottom} isTop={false} />
+
+        {/* Round info */}
+        <div className="mt-4 px-4 py-3 rounded-xl text-center" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+          <span className="text-xs" style={{ color: '#6B6B80' }}>Viewing picks for </span>
+          <span className="text-xs font-bold" style={{ color: '#00FFA3' }}>{ROUND_LABEL[selectedRound]}</span>
+        </div>
+      </SheetContent>
+    </Sheet>
+  )
+}
+
 // ─── BracketTree ───────────────────────────────────────────────────────────
-function BracketTree({ picks, selectedRound }: { picks: SurvivorPick[]; selectedRound: number }) {
+function BracketTree({
+  picks, selectedRound, onTeamClick,
+}: {
+  picks: SurvivorPick[]
+  selectedRound: number
+  onTeamClick: (game: BracketGame, region: string) => void
+}) {
   const pickedTeams = new Set(picks.map((p) => p.team_name))
   const pickedByRound = new Map<string, { result: string; round: number }>()
   for (const p of picks) {
@@ -486,7 +680,13 @@ function BracketTree({ picks, selectedRound }: { picks: SurvivorPick[]; selected
                 const topPicked = pickedTeams.has(game.top.team)
                 const botPicked = pickedTeams.has(game.bottom.team)
                 return (
-                  <div key={game.id} className="mb-2.5 rounded-xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
+                  <button
+                    key={game.id}
+                    onClick={() => onTeamClick(game, region.name)}
+                    className="w-full mb-2.5 rounded-xl overflow-hidden text-left transition-all hover:ring-1 hover:ring-white/20 hover:scale-[1.01]"
+                    style={{ border: '1px solid rgba(255,255,255,0.07)' }}
+                    title="Click to view matchup details"
+                  >
                     {/* Top team */}
                     <div className="flex items-center gap-2 px-3 py-2"
                       style={{ background: topStyle.bg, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
@@ -504,15 +704,307 @@ function BracketTree({ picks, selectedRound }: { picks: SurvivorPick[]; selected
                         <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: botStyle.dot }} />
                       )}
                     </div>
-                  </div>
+                  </button>
                 )
               })}
             </div>
           ))}
         </div>
         <p className="text-center text-[11px] mt-3" style={{ color: '#4A4A60' }}>
-          Showing Round of 64 matchups · Bracket updates round by round as the tournament progresses
+          Click any matchup to view stats and pick a team · Bracket updates round by round
         </p>
+      </div>
+    </div>
+  )
+}
+
+// ─── SimulationResult type (mirrors API) ───────────────────────────────────
+interface SimResult {
+  survivalProbability: number
+  roundSurvivalRates: Record<number, number>
+  mostCommonElimRound: number | null
+  eliminationBreakdown: Record<number, number>
+  bestPath: string[]
+  evVsPool: number
+  simCount: number
+}
+
+// ─── SimulationPanel ───────────────────────────────────────────────────────
+function SimulationPanel({ picks }: { picks: SurvivorPick[] }) {
+  const [running, setRunning] = useState(false)
+  const [result, setResult] = useState<SimResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const runSim = async () => {
+    if (picks.length === 0) {
+      setError('Save at least one pick before running the simulation.')
+      return
+    }
+    setRunning(true)
+    setError(null)
+    try {
+      const simPicks = picks.map((p) => {
+        const edge = MOCK_EDGE_TABLE.find((r) => r.team === p.team_name)
+        return {
+          round: p.round_number,
+          team: p.team_name,
+          winPct: edge?.winPct ?? p.win_probability ?? 65,
+        }
+      })
+      const res = await fetch('/api/survivor/simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ picks: simPicks }),
+      })
+      if (!res.ok) throw new Error('Simulation failed')
+      setResult(await res.json())
+    } catch {
+      setError('Simulation failed. Please try again.')
+    }
+    setRunning(false)
+  }
+
+  const survivalColor = (pct: number) =>
+    pct >= 60 ? '#00FFA3' : pct >= 35 ? '#F59E0B' : '#FF6B6B'
+
+  return (
+    <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+      <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+        <div>
+          <div className="flex items-center gap-2">
+            <FlaskConical className="w-4 h-4" style={{ color: '#06B6D4' }} />
+            <h3 className="font-black text-base" style={{ color: '#E6E6FA' }}>Tournament Simulation Engine</h3>
+          </div>
+          <p className="text-xs mt-0.5" style={{ color: '#6B6B80' }}>
+            10,000 Monte Carlo simulations using your saved picks and win probabilities
+          </p>
+        </div>
+        <button
+          onClick={runSim}
+          disabled={running || picks.length === 0}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-black transition-all hover:opacity-90 disabled:opacity-40"
+          style={{ background: 'linear-gradient(135deg, #06B6D4, #A78BFA)', color: '#000' }}
+        >
+          <FlaskConical className={`w-4 h-4 ${running ? 'animate-spin' : ''}`} />
+          {running ? 'Simulating...' : 'Run Simulation'}
+        </button>
+      </div>
+
+      {picks.length === 0 && !result && (
+        <div className="px-5 py-6 text-center">
+          <p className="text-sm" style={{ color: '#6B6B80' }}>Save picks first to run tournament simulations.</p>
+        </div>
+      )}
+
+      {error && (
+        <div className="px-5 py-3 text-sm" style={{ color: '#FF6B6B' }}>{error}</div>
+      )}
+
+      {result && (
+        <div className="px-5 py-5 space-y-5">
+          {/* Hero stat */}
+          <div className="rounded-2xl p-5 text-center" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+            <div className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: '#6B6B80' }}>Full Survival Probability</div>
+            <div className="text-5xl font-black mb-1" style={{ color: survivalColor(result.survivalProbability) }}>
+              {result.survivalProbability}%
+            </div>
+            <div className="text-xs" style={{ color: '#6B6B80' }}>
+              across {result.simCount.toLocaleString()} simulations
+            </div>
+            {result.evVsPool !== 0 && (
+              <div className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full"
+                style={{ background: result.evVsPool >= 0 ? 'rgba(0,255,163,0.1)' : 'rgba(255,107,107,0.1)', border: `1px solid ${result.evVsPool >= 0 ? 'rgba(0,255,163,0.3)' : 'rgba(255,107,107,0.3)'}` }}>
+                <TrendingUp className="w-3.5 h-3.5" style={{ color: result.evVsPool >= 0 ? '#00FFA3' : '#FF6B6B' }} />
+                <span className="text-xs font-bold" style={{ color: result.evVsPool >= 0 ? '#00FFA3' : '#FF6B6B' }}>
+                  {result.evVsPool >= 0 ? '+' : ''}{result.evVsPool}% vs average pool entry
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Round-by-round survival */}
+          <div>
+            <div className="text-xs font-bold uppercase tracking-wider mb-3" style={{ color: '#6B6B80' }}>Round-by-Round Survival Rate</div>
+            <div className="space-y-2">
+              {Object.entries(result.roundSurvivalRates).map(([round, rate]) => (
+                <div key={round} className="flex items-center gap-3">
+                  <span className="text-xs w-28 flex-shrink-0" style={{ color: '#A0A0B0' }}>
+                    {ROUND_LABEL[Number(round)] ?? `Round ${round}`}
+                  </span>
+                  <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+                    <div className="h-full rounded-full transition-all" style={{ width: `${rate}%`, background: survivalColor(rate) }} />
+                  </div>
+                  <span className="text-xs font-black w-12 text-right flex-shrink-0" style={{ color: survivalColor(rate) }}>{rate}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Elim breakdown */}
+          {Object.keys(result.eliminationBreakdown).length > 0 && (
+            <div>
+              <div className="text-xs font-bold uppercase tracking-wider mb-3" style={{ color: '#6B6B80' }}>
+                Elimination Risk by Round
+                {result.mostCommonElimRound && (
+                  <span className="ml-2 font-normal normal-case" style={{ color: '#FF6B6B' }}>
+                    · Most likely: {ROUND_LABEL[result.mostCommonElimRound]}
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {Object.entries(result.eliminationBreakdown).map(([round, pct]) => (
+                  <div key={round} className="rounded-xl p-3 text-center"
+                    style={{ background: 'rgba(255,107,107,0.06)', border: '1px solid rgba(255,107,107,0.12)' }}>
+                    <div className="text-sm font-black" style={{ color: '#FF6B6B' }}>{pct}%</div>
+                    <div className="text-[10px] mt-0.5" style={{ color: '#6B6B80' }}>
+                      {ROUND_LABEL[Number(round)] ?? `R${round}`}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Best path */}
+          {result.bestPath.length > 0 && (
+            <div>
+              <div className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#6B6B80' }}>Optimal Survival Path</div>
+              <div className="flex flex-wrap gap-2">
+                {result.bestPath.map((team, i) => (
+                  <div key={team} className="flex items-center gap-1.5">
+                    {i > 0 && <ChevronRight className="w-3 h-3 flex-shrink-0" style={{ color: '#4A4A60' }} />}
+                    <span className="text-xs font-bold px-2.5 py-1 rounded-full"
+                      style={{ background: 'rgba(0,255,163,0.08)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.2)' }}>
+                      {team}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── ShareCard ─────────────────────────────────────────────────────────────
+function ShareCard({ picks, poolName }: { picks: SurvivorPick[]; poolName: string }) {
+  const cardRef = useRef<HTMLDivElement>(null)
+  const [sharing, setSharing] = useState(false)
+
+  const handleDownload = async () => {
+    if (!cardRef.current) return
+    setSharing(true)
+    try {
+      const html2canvas = (await import('html2canvas')).default
+      const canvas = await html2canvas(cardRef.current, {
+        backgroundColor: '#0F0F1A',
+        scale: 2,
+        useCORS: true,
+        logging: false,
+      })
+      const link = document.createElement('a')
+      link.download = 'survivor-picks.png'
+      link.href = canvas.toDataURL('image/png')
+      link.click()
+    } catch { /* ignore */ }
+    setSharing(false)
+  }
+
+  const handleTwitter = () => {
+    const text = encodeURIComponent(
+      `My NCAA Survivor picks for ${poolName}: ${picks.slice(0, 3).map((p) => p.team_name).join(', ')}... 🏀 #MarchMadness #Survivor`
+    )
+    window.open(`https://twitter.com/intent/tweet?text=${text}`, '_blank')
+  }
+
+  const roundedPicks = picks.slice(0, 6)
+  if (roundedPicks.length === 0) return null
+
+  return (
+    <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+      <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+        <div>
+          <div className="flex items-center gap-2">
+            <Share2 className="w-4 h-4" style={{ color: '#A78BFA' }} />
+            <h3 className="font-black text-base" style={{ color: '#E6E6FA' }}>Share My Survivor Strategy</h3>
+          </div>
+          <p className="text-xs mt-0.5" style={{ color: '#6B6B80' }}>Download a shareable pick card for your picks</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleTwitter}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all hover:opacity-90"
+            style={{ background: 'rgba(29,161,242,0.12)', border: '1px solid rgba(29,161,242,0.3)', color: '#1DA1F2' }}
+          >
+            <Share2 className="w-3.5 h-3.5" />
+            Tweet
+          </button>
+          <button
+            onClick={handleDownload}
+            disabled={sharing}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all hover:opacity-90 disabled:opacity-50"
+            style={{ background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.3)', color: '#A78BFA' }}
+          >
+            <Download className="w-3.5 h-3.5" />
+            {sharing ? 'Saving...' : 'Download'}
+          </button>
+        </div>
+      </div>
+
+      {/* The shareable card (rendered off-screen at full res, visible as preview) */}
+      <div className="p-4">
+        <div
+          ref={cardRef}
+          style={{
+            width: 600, padding: 32,
+            background: 'linear-gradient(135deg, #0F0F1A 0%, #1A1A2E 100%)',
+            borderRadius: 20,
+            border: '1px solid rgba(0,255,163,0.2)',
+            fontFamily: 'system-ui, sans-serif',
+          }}
+        >
+          {/* Card header */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(245,158,11,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <span style={{ fontSize: 20 }}>🏆</span>
+            </div>
+            <div>
+              <div style={{ color: '#E6E6FA', fontSize: 16, fontWeight: 900 }}>QuantEdge Survivor Strategy</div>
+              <div style={{ color: '#6B6B80', fontSize: 12 }}>{poolName} · 2026 NCAA Tournament</div>
+            </div>
+            <div style={{ marginLeft: 'auto', color: '#00FFA3', fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 20, border: '1px solid rgba(0,255,163,0.3)', background: 'rgba(0,255,163,0.08)' }}>
+              AI Powered
+            </div>
+          </div>
+
+          {/* Picks */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
+            {roundedPicks.map((p) => {
+              const edge = MOCK_EDGE_TABLE.find((r) => r.team === p.team_name)
+              const winPct = edge?.winPct ?? p.win_probability ?? 0
+              return (
+                <div key={p.id} style={{ background: 'rgba(255,255,255,0.05)', borderRadius: 12, padding: '12px 14px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <div style={{ color: '#6B6B80', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
+                    {ROUND_LABEL[p.round_number] ?? `Round ${p.round_number}`}
+                  </div>
+                  <div style={{ color: '#E6E6FA', fontSize: 15, fontWeight: 900 }}>{p.team_name}</div>
+                  {p.team_seed != null && (
+                    <div style={{ color: '#6B6B80', fontSize: 11, marginTop: 2 }}>#{p.team_seed} seed · {winPct}% win prob</div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Footer */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 16, borderTop: '1px solid rgba(255,255,255,0.07)' }}>
+            <div style={{ color: '#4A4A60', fontSize: 11 }}>quantedge.ai · AI Survivor Pool Strategy</div>
+            <div style={{ color: '#00FFA3', fontSize: 11, fontWeight: 700 }}>{roundedPicks.length} picks saved</div>
+          </div>
+        </div>
+        <p className="text-center text-[11px] mt-3" style={{ color: '#4A4A60' }}>Preview · Download saves at 2× resolution</p>
       </div>
     </div>
   )
@@ -1296,6 +1788,8 @@ export default function SurvivorPage() {
   const [selectedRound, setSelectedRound] = useState(1)
   const [toast, setToast] = useState<ToastState>(null)
   const [syncing, setSyncing] = useState(false)
+  const [matchupSheet, setMatchupSheet] = useState<SelectedMatchup | null>(null)
+  const [sheetOpen, setSheetOpen] = useState(false)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const effectiveBracketReleased = bracketReleased || testModeActive
@@ -1468,11 +1962,16 @@ export default function SurvivorPage() {
     </div>
   )
 
+  const handleMatchupClick = (game: BracketGame, region: string) => {
+    setMatchupSheet({ game, region })
+    setSheetOpen(true)
+  }
+
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
       {/* Header */}
-      <div className="mb-8">
-        <div className="flex items-center gap-2 mb-2">
+      <div className="mb-6">
+        <div className="flex items-center gap-2 mb-1">
           <Trophy className="w-5 h-5" style={{ color: '#F59E0B' }} />
           <h1 className="text-2xl font-black" style={{ color: '#E6E6FA' }}>QuantEdge Survivor Pool Assistant</h1>
         </div>
@@ -1497,22 +1996,24 @@ export default function SurvivorPage() {
 
       {/* Pre-bracket */}
       {!effectiveBracketReleased && (
-        <PreBracketOverlay
-          countdown={countdown}
-          pools={pools}
-          activePoolId={activePoolId}
-          showSetup={showSetup}
-          setShowSetup={setShowSetup}
-          onSave={handlePoolSave}
-        />
+        <div className="max-w-3xl">
+          <PreBracketOverlay
+            countdown={countdown}
+            pools={pools}
+            activePoolId={activePoolId}
+            showSetup={showSetup}
+            setShowSetup={setShowSetup}
+            onSave={handlePoolSave}
+          />
+        </div>
       )}
 
       {/* Post-bracket */}
       {effectiveBracketReleased && (
-        <div className="space-y-8">
+        <div className="space-y-6">
           {/* Pool setup or create prompt */}
           {!activePool && !showSetup && (
-            <div className="rounded-2xl p-6 text-center" style={{ background: 'rgba(0,255,163,0.06)', border: '1px solid rgba(0,255,163,0.2)' }}>
+            <div className="max-w-xl mx-auto rounded-2xl p-6 text-center" style={{ background: 'rgba(0,255,163,0.06)', border: '1px solid rgba(0,255,163,0.2)' }}>
               <Shield className="w-8 h-8 mx-auto mb-3" style={{ color: '#00FFA3' }} />
               <h2 className="text-lg font-black mb-2" style={{ color: '#E6E6FA' }}>Set Up Your Survivor Pool</h2>
               <p className="text-sm mb-4" style={{ color: '#A0A0B0' }}>Configure your pool rules so the AI can build a personalized survival strategy.</p>
@@ -1523,7 +2024,7 @@ export default function SurvivorPage() {
           )}
 
           {showSetup && (
-            <div className="space-y-4">
+            <div className="max-w-2xl space-y-4">
               <button
                 onClick={() => { setShowSetup(false); if (!activePoolId && pools.length > 0) setActivePoolId(pools[0].id) }}
                 className="flex items-center gap-1.5 text-xs font-semibold hover:opacity-80"
@@ -1557,8 +2058,12 @@ export default function SurvivorPage() {
                 onCreateNew={handleCreateNew}
               />
 
-              {/* 2. Bracket Tree */}
-              <BracketTree picks={picks} selectedRound={selectedRound} />
+              {/* 2. Bracket Tree — full width */}
+              <BracketTree
+                picks={picks}
+                selectedRound={selectedRound}
+                onTeamClick={handleMatchupClick}
+              />
 
               {/* 3. Used Teams Badge */}
               {usedTeams.length > 0 && <UsedTeamsBadge teams={usedTeams} />}
@@ -1566,78 +2071,106 @@ export default function SurvivorPage() {
               {/* 4. Round Selector (sticky) */}
               <RoundSelector selectedRound={selectedRound} onSelect={setSelectedRound} picks={picks} />
 
-              {/* 5. AI Pick Card */}
-              {MOCK_AI_PICKS.filter((p) => p.round === selectedRound).map((pick) => {
-                const roundKey = ROUND_NUM_TO_KEY[pick.round]
-                const poolPicksPerRound = activePool.pick_format === 'multiple_per_round'
-                  ? (activePool.picks_per_round ?? null)
-                  : null
-                const picksNeeded = poolPicksPerRound && roundKey ? poolPicksPerRound[roundKey] : undefined
-                const picksMade = picks.filter((p) => p.round_number === pick.round).length
-                return (
-                  <AIPickCard
-                    key={pick.round}
-                    pick={pick}
-                    isPremium={isPremium}
-                    usedTeams={usedTeams}
-                    onPickTeam={handlePickTeam}
-                    picksNeeded={picksNeeded}
-                    picksMade={picksMade}
-                  />
-                )
-              })}
+              {/* 5–6. Two-column: AI picks (65%) + Strategy Planner (35%) */}
+              <div className="grid grid-cols-1 xl:grid-cols-[65fr_35fr] gap-6 items-start">
+                {/* Left column */}
+                <div className="space-y-6">
+                  {/* AI Pick Card */}
+                  {MOCK_AI_PICKS.filter((p) => p.round === selectedRound).map((pick) => {
+                    const roundKey = ROUND_NUM_TO_KEY[pick.round]
+                    const poolPicksPerRound = activePool.pick_format === 'multiple_per_round'
+                      ? (activePool.picks_per_round ?? null)
+                      : null
+                    const picksNeeded = poolPicksPerRound && roundKey ? poolPicksPerRound[roundKey] : undefined
+                    const picksMade = picks.filter((p) => p.round_number === pick.round).length
+                    return (
+                      <AIPickCard
+                        key={pick.round}
+                        pick={pick}
+                        isPremium={isPremium}
+                        usedTeams={usedTeams}
+                        onPickTeam={handlePickTeam}
+                        picksNeeded={picksNeeded}
+                        picksMade={picksMade}
+                      />
+                    )
+                  })}
 
-              {/* Show a message for rounds beyond round 1 where no AI pick exists yet */}
-              {selectedRound > 1 && MOCK_AI_PICKS.filter((p) => p.round === selectedRound).length === 0 && (
-                <div className="rounded-2xl p-6 text-center" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
-                  <Trophy className="w-6 h-6 mx-auto mb-2" style={{ color: '#6B6B80' }} />
-                  <p className="text-sm font-semibold mb-1" style={{ color: '#A0A0B0' }}>AI picks for {ROUND_LABEL[selectedRound]} coming soon</p>
-                  <p className="text-xs" style={{ color: '#6B6B80' }}>AI recommendations generate as the bracket progresses. You can still manually select a pick from the edge table below.</p>
+                  {/* Message for rounds with no AI pick yet */}
+                  {selectedRound > 1 && MOCK_AI_PICKS.filter((p) => p.round === selectedRound).length === 0 && (
+                    <div className="rounded-2xl p-6 text-center" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                      <Trophy className="w-6 h-6 mx-auto mb-2" style={{ color: '#6B6B80' }} />
+                      <p className="text-sm font-semibold mb-1" style={{ color: '#A0A0B0' }}>AI picks for {ROUND_LABEL[selectedRound]} coming soon</p>
+                      <p className="text-xs" style={{ color: '#6B6B80' }}>AI recommendations generate as the bracket progresses. You can still pick from the edge table below.</p>
+                    </div>
+                  )}
+
+                  {/* Edge Table */}
+                  <SurvivorEdgeTable usedTeams={usedTeams} onPickTeam={handlePickTeam} selectedRound={selectedRound} />
+
+                  {/* Reservation Tool */}
+                  <ReservationTool usedTeams={usedTeams} />
+
+                  {/* Simulation Panel */}
+                  <SimulationPanel picks={picks} />
+
+                  {/* Share Card */}
+                  {picks.length > 0 && (
+                    <ShareCard picks={picks} poolName={activePool.pool_name} />
+                  )}
                 </div>
-              )}
 
-              {/* 6. Edge Table */}
-              <SurvivorEdgeTable usedTeams={usedTeams} onPickTeam={handlePickTeam} selectedRound={selectedRound} />
+                {/* Right column — Strategy Planner (sticky on large screens) */}
+                <div className="xl:sticky xl:top-4 space-y-4">
+                  <StrategyPlanner picks={picks} onDelete={handleDeletePick} syncing={syncing} onSync={handleSyncResults} />
 
-              {/* 7. Reservation Tool */}
-              <ReservationTool usedTeams={usedTeams} />
+                  {/* Edit pool button */}
+                  <div className="flex justify-center">
+                    <button
+                      onClick={() => setShowSetup(true)}
+                      className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold transition-all hover:bg-white/5"
+                      style={{ color: '#A0A0B0', border: '1px solid rgba(255,255,255,0.09)' }}
+                    >
+                      <RotateCcw className="w-3 h-3" /> Edit Pool Rules
+                    </button>
+                  </div>
 
-              {/* 8. Strategy Planner */}
-              <StrategyPlanner picks={picks} onDelete={handleDeletePick} syncing={syncing} onSync={handleSyncResults} />
-
-              {/* Edit pool button */}
-              <div className="flex justify-center">
-                <button
-                  onClick={() => setShowSetup(true)}
-                  className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold transition-all hover:bg-white/5"
-                  style={{ color: '#A0A0B0', border: '1px solid rgba(255,255,255,0.09)' }}
-                >
-                  <RotateCcw className="w-3 h-3" /> Edit Pool Rules
-                </button>
+                  {/* Premium upsell */}
+                  {!isPremium && (
+                    <div className="rounded-2xl p-5 text-center"
+                      style={{ background: 'linear-gradient(135deg, rgba(0,255,163,0.06), rgba(59,130,246,0.06))', border: '1px solid rgba(0,255,163,0.18)' }}>
+                      <Star className="w-6 h-6 mx-auto mb-2" style={{ color: '#00FFA3' }} />
+                      <h3 className="font-black text-sm mb-1" style={{ color: '#E6E6FA' }}>Unlock Full Survivor Strategy</h3>
+                      <p className="text-xs mb-3" style={{ color: '#A0A0B0' }}>
+                        Premium includes full AI reasoning, alternative picks, Survivor EV analysis, and upset recalculations.
+                      </p>
+                      <Link href="/dashboard/pricing">
+                        <Button className="gradient-green text-black font-bold px-5 py-3 rounded-xl border-0 hover:opacity-90 neon-glow text-xs">
+                          Upgrade to Premium
+                        </Button>
+                      </Link>
+                    </div>
+                  )}
+                </div>
               </div>
-
-              {/* 9. Premium upsell */}
-              {!isPremium && (
-                <div className="rounded-2xl p-6 text-center"
-                  style={{ background: 'linear-gradient(135deg, rgba(0,255,163,0.06), rgba(59,130,246,0.06))', border: '1px solid rgba(0,255,163,0.18)' }}>
-                  <Star className="w-7 h-7 mx-auto mb-3" style={{ color: '#00FFA3' }} />
-                  <h3 className="font-black text-base mb-1" style={{ color: '#E6E6FA' }}>Unlock Full Survivor Strategy</h3>
-                  <p className="text-xs mb-4 max-w-xs mx-auto" style={{ color: '#A0A0B0' }}>
-                    Premium includes full AI reasoning, alternative picks, Survivor EV analysis, future round planning, and upset recalculations.
-                  </p>
-                  <Link href="/dashboard/pricing">
-                    <Button className="gradient-green text-black font-bold px-6 py-4 rounded-xl border-0 hover:opacity-90 neon-glow text-sm">
-                      Upgrade to Premium
-                    </Button>
-                  </Link>
-                </div>
-              )}
             </>
           )}
         </div>
       )}
 
-      {/* 10. Inline Toast (fixed overlay) */}
+      {/* Matchup Sheet (right-side panel) */}
+      <MatchupSheet
+        matchup={matchupSheet}
+        open={sheetOpen}
+        onClose={() => setSheetOpen(false)}
+        picks={picks}
+        usedTeams={usedTeams}
+        isPremium={isPremium}
+        onPickTeam={handlePickTeam}
+        selectedRound={selectedRound}
+      />
+
+      {/* Inline Toast (fixed overlay) */}
       <InlineToast toast={toast} />
     </div>
   )
