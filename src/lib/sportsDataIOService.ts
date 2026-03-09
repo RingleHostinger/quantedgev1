@@ -6,9 +6,13 @@
  * so all downstream services (sync, predictions, picks, grading) are unaffected.
  *
  * Endpoints used:
- *   GamesByDate:    /v3/{league}/scores/json/GamesByDate/{YYYY-MMM-DD}
- *   GameOddsByDate: /v3/{league}/odds/json/GameOddsByDate/{YYYY-MMM-DD}
- *   Injuries:       /v3/{league}/scores/json/Injuries
+ *   GamesByDate:         /v3/{league}/scores/json/GamesByDate/{YYYY-MMM-DD}
+ *   GameOddsByDate:      /v3/{league}/odds/json/GameOddsByDate/{YYYY-MMM-DD}
+ *   InjuredPlayers:      /v3/nba/projections/json/InjuredPlayers   (NBA)
+ *                        /v3/nhl/projections/json/InjuredPlayers   (NHL)
+ *                        /v3/cbb/scores/json/InjuredPlayers        (CBB)
+ *   BettingSplitsByGameId: /v3/{league}/odds/json/BettingSplitsByGameId/{gameId}
+ *                          (NBA, NHL, CBB — same path pattern, confirmed)
  *
  * Auth: query param ?key={API_KEY}
  *
@@ -52,12 +56,13 @@ interface LeagueConfig {
   sdioKey: string          // URL segment: nba | nhl | cbb
   league: string           // our internal label: NBA | NHL | NCAAB
   sport: string            // our internal label: Basketball | Hockey
+  injuryPath: string       // base path for InjuredPlayers endpoint (differs by league)
 }
 
 const SDIO_LEAGUES: LeagueConfig[] = [
-  { sdioKey: 'nba', league: 'NBA',   sport: 'Basketball' },
-  { sdioKey: 'nhl', league: 'NHL',   sport: 'Hockey'     },
-  { sdioKey: 'cbb', league: 'NCAAB', sport: 'Basketball' },
+  { sdioKey: 'nba', league: 'NBA',   sport: 'Basketball', injuryPath: 'projections' },
+  { sdioKey: 'nhl', league: 'NHL',   sport: 'Hockey',     injuryPath: 'projections' },
+  { sdioKey: 'cbb', league: 'NCAAB', sport: 'Basketball', injuryPath: 'scores'      },
 ]
 
 // ─── SportsDataIO response types ───────────────────────────────────────────────
@@ -515,7 +520,11 @@ async function fetchInjuriesForLeague(
   config: LeagueConfig,
   apiKey: string,
 ): Promise<SdioInjuryPlayer[]> {
-  const url = `${SDIO_BASE}/${config.sdioKey}/scores/json/Injuries?key=${apiKey}`
+  // Confirmed endpoints:
+  //   NBA: /v3/nba/projections/json/InjuredPlayers
+  //   NHL: /v3/nhl/projections/json/InjuredPlayers
+  //   CBB: /v3/cbb/scores/json/InjuredPlayers
+  const url = `${SDIO_BASE}/${config.sdioKey}/${config.injuryPath}/json/InjuredPlayers?key=${apiKey}`
   const data = await sdioFetch(url)
   if (!Array.isArray(data)) return []
 
@@ -615,129 +624,198 @@ export interface SdioBettingSplit {
   currentTotal:  number | null
 }
 
-interface SDIOBettingSplitRaw {
-  GameId:               number
-  HomeTeam?:            string
-  AwayTeam?:            string
-  HomeTeamName?:        string
-  AwayTeamName?:        string
-  // Consensus splits (where available)
-  SpreadHomePercentage?:  number | null
-  SpreadAwayPercentage?:  number | null
-  SpreadHomeMoneyPercentage?: number | null
-  SpreadAwayMoneyPercentage?: number | null
-  MoneyLineHomePercentage?: number | null
-  MoneyLineAwayPercentage?: number | null
-  MoneyLineHomeMoneyPercentage?: number | null
-  MoneyLineAwayMoneyPercentage?: number | null
-  OverPercentage?:      number | null
-  UnderPercentage?:     number | null
-  // Line movement (from GameLines)
+// ─── GameBettingSplit response shape ────────────────────────────────────────────
+// Confirmed endpoint: /v3/{league}/odds/json/BettingSplitsByGameId/{gameId}
+// Returns: GameBettingSplit (with nested BettingMarketSplit[] → BettingSplit[])
+
+interface SDIOBettingSplitEntry {
+  Name?:             string    // "Home", "Away", "Over", "Under"
+  BetPercentage?:    number | null
+  MoneyPercentage?:  number | null
+}
+
+interface SDIOBettingMarketSplit {
+  BettingMarketTypeID?: number  // 1=Spread, 2=Moneyline, 3=Over/Under
+  BettingMarketType?:   string  // "Spread", "Moneyline", "Over/Under"
+  BettingSplits?:       SDIOBettingSplitEntry[]
+  // Line movement fields (present on the market level)
   SpreadOpen?:          number | null
-  PointSpreadHome?:     number | null
-  OverUnderOpen?:       number | null
-  OverUnder?:           number | null
+  SpreadCurrent?:       number | null
+  TotalOpen?:           number | null
+  TotalCurrent?:        number | null
+}
+
+interface SDIOGameBettingSplit {
+  GameId?:          number
+  BettingMarkets?:  SDIOBettingMarketSplit[]
+  // Line movement may also appear at the top level
+  SpreadOpen?:      number | null
+  SpreadCurrent?:   number | null
+  TotalOpen?:       number | null
+  TotalCurrent?:    number | null
 }
 
 /**
- * Fetch betting splits for a given date from SportsDataIO BettingSplitsByDate.
- * Endpoint: /v3/{league}/odds/json/BettingSplitsByGameOddsLineMovement/{date}
- * Falls back to GameOddsByDate if splits not available.
+ * Parse a GameBettingSplit response into our normalized SdioBettingSplit shape.
+ * The response contains BettingMarkets[] with nested BettingSplits[].
+ * MarketTypeID: 1=Spread, 2=Moneyline, 3=Over/Under
+ */
+function parseGameBettingSplit(
+  raw: SDIOGameBettingSplit,
+  game: SDIOGame,
+  league: string,
+): SdioBettingSplit {
+  const homeTeam = game.HomeTeamName ?? game.HomeTeam
+  const awayTeam = game.AwayTeamName ?? game.AwayTeam
+
+  let spreadHomeBeats: number | null = null
+  let spreadAwayBets:  number | null = null
+  let spreadHomeMoney: number | null = null
+  let spreadAwayMoney: number | null = null
+  let mlHomeBets:      number | null = null
+  let mlAwayBets:      number | null = null
+  let mlHomeMoney:     number | null = null
+  let mlAwayMoney:     number | null = null
+  let overBets:        number | null = null
+  let underBets:       number | null = null
+  let openingSpread:   number | null = raw.SpreadOpen ?? null
+  let currentSpread:   number | null = raw.SpreadCurrent ?? null
+  let openingTotal:    number | null = raw.TotalOpen ?? null
+  let currentTotal:    number | null = raw.TotalCurrent ?? null
+
+  for (const market of raw.BettingMarkets ?? []) {
+    const splits = market.BettingSplits ?? []
+    const typeId = market.BettingMarketTypeID
+    const typeName = (market.BettingMarketType ?? '').toLowerCase()
+
+    // Prefer line movement from the market level if not at root
+    if (market.SpreadOpen != null && openingSpread == null)   openingSpread = market.SpreadOpen
+    if (market.SpreadCurrent != null && currentSpread == null) currentSpread = market.SpreadCurrent
+    if (market.TotalOpen != null && openingTotal == null)      openingTotal  = market.TotalOpen
+    if (market.TotalCurrent != null && currentTotal == null)   currentTotal  = market.TotalCurrent
+
+    const isSpread    = typeId === 1 || typeName.includes('spread')
+    const isMoneyline = typeId === 2 || typeName.includes('moneyline') || typeName.includes('money line')
+    const isTotal     = typeId === 3 || typeName.includes('over') || typeName.includes('under') || typeName.includes('total')
+
+    for (const s of splits) {
+      const name = (s.Name ?? '').toLowerCase()
+      const bet  = s.BetPercentage   ?? null
+      const mon  = s.MoneyPercentage ?? null
+
+      if (isSpread) {
+        if (name === 'home')  { spreadHomeBeats = bet; spreadHomeMoney = mon }
+        if (name === 'away')  { spreadAwayBets  = bet; spreadAwayMoney = mon }
+      } else if (isMoneyline) {
+        if (name === 'home')  { mlHomeBets = bet; mlHomeMoney = mon }
+        if (name === 'away')  { mlAwayBets = bet; mlAwayMoney = mon }
+      } else if (isTotal) {
+        if (name === 'over')  overBets  = bet
+        if (name === 'under') underBets = bet
+      }
+    }
+  }
+
+  return {
+    gameId:          buildGameId(game.GameId),
+    league,
+    homeTeam,
+    awayTeam,
+    spreadHomeBeats,
+    spreadAwayBets,
+    spreadHomeMoney,
+    spreadAwayMoney,
+    mlHomeBets,
+    mlAwayBets,
+    mlHomeMoney,
+    mlAwayMoney,
+    overBets,
+    underBets,
+    openingSpread,
+    currentSpread,
+    openingTotal,
+    currentTotal,
+  }
+}
+
+/**
+ * Fetch betting splits for all of today's games in one league.
+ * Confirmed endpoints:
+ *   NBA: /v3/nba/odds/json/BettingSplitsByGameId/{gameId}
+ *   NHL: /v3/nhl/odds/json/BettingSplitsByGameId/{gameId}
+ *   CBB: /v3/cbb/odds/json/BettingSplitsByGameId/{gameId}
+ *
+ * Flow: GamesByDate → extract GameIds → BettingSplitsByGameId per game (parallel)
  */
 async function fetchBettingSplitsForLeague(
   config: LeagueConfig,
   apiKey: string,
-  dateStr: string,
-): Promise<SdioBettingSplit[]> {
-  // Try the betting splits endpoint first
-  const splitsUrl = `${SDIO_BASE}/${config.sdioKey}/odds/json/BettingSplitsByGameOddsLineMovement/${dateStr}?key=${apiKey}`
-  let data: unknown
-  try {
-    data = await sdioFetch(splitsUrl)
-  } catch {
-    // Splits may not be available on all subscription tiers — fall back to line movement
-    data = []
-  }
+): Promise<{ splits: SdioBettingSplit[]; errors: string[] }> {
+  const dates  = getSdioFetchDates()
+  const errors: string[] = []
 
-  // If splits endpoint returned nothing, try alternative: AlternateMarketGameOddsByDate
-  const rawList = Array.isArray(data) ? data as SDIOBettingSplitRaw[] : []
+  // Step 1: Get today's games to obtain their integer GameIds
+  const gamesByDate = await Promise.all(
+    dates.map((d) => fetchGamesByDate(config.sdioKey, apiKey, d).catch(() => [] as SDIOGame[]))
+  )
+  const allGames = gamesByDate.flat().filter(
+    (g) => g.Status !== 'Canceled' && g.Status !== 'Postponed'
+  )
 
-  // Also fetch GameOddsByDate to get opening/current lines for movement tracking
-  let linesData: SDIOGameOdds[] = []
-  try {
-    linesData = await fetchOddsByDate(config.sdioKey, apiKey, dateStr)
-  } catch {
-    // non-fatal
-  }
+  if (!allGames.length) return { splits: [], errors }
 
-  const linesMap = new Map<number, SDIOGameOdds>()
-  for (const l of linesData) linesMap.set(l.GameId, l)
-
+  // Step 2: Fetch BettingSplitsByGameId for each game in parallel
   const results: SdioBettingSplit[] = []
 
-  for (const raw of rawList) {
-    const lineData  = linesMap.get(raw.GameId)
-    const bestLine  = lineData ? pickBestOdds(lineData.PregameOdds) : null
-
-    results.push({
-      gameId:           buildGameId(raw.GameId),
-      league:           config.league,
-      homeTeam:         raw.HomeTeamName ?? raw.HomeTeam ?? '',
-      awayTeam:         raw.AwayTeamName ?? raw.AwayTeam ?? '',
-      spreadHomeBeats:  raw.SpreadHomePercentage ?? null,
-      spreadAwayBets:   raw.SpreadAwayPercentage ?? null,
-      spreadHomeMoney:  raw.SpreadHomeMoneyPercentage ?? null,
-      spreadAwayMoney:  raw.SpreadAwayMoneyPercentage ?? null,
-      mlHomeBets:       raw.MoneyLineHomePercentage ?? null,
-      mlAwayBets:       raw.MoneyLineAwayPercentage ?? null,
-      mlHomeMoney:      raw.MoneyLineHomeMoneyPercentage ?? null,
-      mlAwayMoney:      raw.MoneyLineAwayMoneyPercentage ?? null,
-      overBets:         raw.OverPercentage ?? null,
-      underBets:        raw.UnderPercentage ?? null,
-      openingSpread:    raw.SpreadOpen ?? null,
-      currentSpread:    bestLine?.HomePointSpread ?? raw.PointSpreadHome ?? null,
-      openingTotal:     raw.OverUnderOpen ?? null,
-      currentTotal:     bestLine?.OverUnder ?? raw.OverUnder ?? null,
+  await Promise.allSettled(
+    allGames.map(async (game) => {
+      const url = `${SDIO_BASE}/${config.sdioKey}/odds/json/BettingSplitsByGameId/${game.GameId}?key=${apiKey}`
+      try {
+        const data = await sdioFetch(url)
+        // Response is a single GameBettingSplit object (not an array)
+        const raw = (Array.isArray(data) ? data[0] : data) as SDIOGameBettingSplit | null
+        if (!raw) return
+        results.push(parseGameBettingSplit(raw, game, config.league))
+      } catch (err) {
+        errors.push(`${config.league} game ${game.GameId}: ${err instanceof Error ? err.message : String(err)}`)
+      }
     })
-  }
+  )
 
-  return results
+  return { splits: results, errors }
 }
 
 /**
- * Fetch betting splits for all configured leagues for today's date.
+ * Fetch betting splits for all configured leagues for today's slate.
  */
 export async function fetchBettingSplits(): Promise<{
   splits: SdioBettingSplit[]
   errors: string[]
 }> {
-  const errors: string[] = []
+  const allErrors: string[] = []
   const all: SdioBettingSplit[] = []
 
   const apiKey = getSdioApiKey()
   if (!apiKey) {
     return { splits: [], errors: ['No SPORTSDATAIO_API_KEY env var configured'] }
   }
-  const configuredLeagues = SDIO_LEAGUES
-
-  const dates = getSdioFetchDates()
 
   await Promise.allSettled(
-    configuredLeagues.flatMap((config) =>
-      dates.map(async (dateStr) => {
-        try {
-          const splits = await fetchBettingSplitsForLeague(config, apiKey, dateStr)
-          all.push(...splits)
-          console.info(`[sportsDataIOService] betting splits ${config.league} ${dateStr}: ${splits.length}`)
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err)
-          errors.push(`${config.league} ${dateStr}: ${msg}`)
-        }
-      })
-    )
+    SDIO_LEAGUES.map(async (config) => {
+      try {
+        const { splits, errors } = await fetchBettingSplitsForLeague(config, apiKey)
+        all.push(...splits)
+        allErrors.push(...errors)
+        console.info(`[sportsDataIOService] betting splits ${config.league}: ${splits.length} games`)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        allErrors.push(`${config.league}: ${msg}`)
+        console.error(`[sportsDataIOService] betting splits ${config.league} FAILED:`, msg)
+      }
+    })
   )
 
-  // Deduplicate by gameId (same game may appear for today + tomorrow)
+  // Deduplicate by gameId
   const seen = new Set<string>()
   const deduped = all.filter((s) => {
     if (seen.has(s.gameId)) return false
@@ -745,7 +823,7 @@ export async function fetchBettingSplits(): Promise<{
     return true
   })
 
-  return { splits: deduped, errors }
+  return { splits: deduped, errors: allErrors }
 }
 
 // ─── Future feature hooks ───────────────────────────────────────────────────────

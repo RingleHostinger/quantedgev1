@@ -302,7 +302,11 @@ export const SportsDataIOProvider: DataProvider = {
       : 'nba'
 
     try {
-      const url = `https://api.sportsdata.io/v3/${sdioLeague}/scores/json/Injuries?key=${apiKey}`
+      // Confirmed endpoints:
+      //   NBA/NHL: /v3/{league}/projections/json/InjuredPlayers
+      //   CBB:     /v3/cbb/scores/json/InjuredPlayers
+      const injuryPath = sdioLeague === 'cbb' ? 'scores' : 'projections'
+      const url = `https://api.sportsdata.io/v3/${sdioLeague}/${injuryPath}/json/InjuredPlayers?key=${apiKey}`
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), 10_000)
       let res: Response

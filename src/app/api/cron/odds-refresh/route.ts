@@ -5,12 +5,17 @@
  * Schedule: 0 * * * *
  *
  * Responsibilities (every hour):
- *   1. Refresh sportsbook odds from The Odds API → cached_odds
- *   2. Sync cached_odds → games table, recalculate predictions + edges
- *   3. Capture closing line value (CLV) for picks within 10 min of tip-off
- *   4. Fetch final scores for any completed games
- *   5. Grade pending official picks whose games now have final scores
- *   6. Log run to engine_runs
+ *   1. Capture closing line value (CLV) for picks near tip-off
+ *   2. Refresh sportsbook odds via TheOddsAPI → cached_odds   [CORE]
+ *   3. Sync cached_odds → games + predictions + official picks [CORE]
+ *   4. Fetch final scores via TheOddsAPI → games table         [CORE]
+ *   5. Cache injuries + betting splits via SportsDataIO        [ENRICHMENT]
+ *   6. Grade pending official picks with final scores          [CORE]
+ *   7. Log run to engine_runs
+ *
+ * Data sources:
+ *   - TheOddsAPI  → steps 2, 3, 4 (odds, schedule, scores, picks)
+ *   - SportsDataIO → step 5 only (injuries, betting splits enrichment)
  *
  * Security: Requires either a valid admin session OR the CRON_SECRET header/bearer token.
  * Vercel Cron sends: Authorization: Bearer <CRON_SECRET>
