@@ -12,10 +12,11 @@
  *
  * Auth: query param ?key={API_KEY}
  *
- * Required env vars:
- *   SPORTSDATAIO_NBA_KEY   — NBA API key
- *   SPORTSDATAIO_NHL_KEY   — NHL API key
- *   SPORTSDATAIO_CBB_KEY   — CBB/NCAAB API key
+ * Required env var (single key covers all leagues):
+ *   SPORTSDATAIO_API_KEY   — SportsDataIO API key
+ *
+ * Legacy per-league vars still accepted as fallbacks:
+ *   SPORTSDATAIO_NBA_KEY / SPORTSDATAIO_NHL_KEY / SPORTSDATAIO_CBB_KEY
  */
 
 import { supabaseAdmin } from '@/integrations/supabase/server'
@@ -30,19 +31,33 @@ const PREFERRED_BOOKMAKERS = [
   'BetRivers', 'William Hill', 'Barstool',
 ]
 
+/**
+ * Resolve the SportsDataIO API key from env vars.
+ * Priority: SPORTSDATAIO_API_KEY → SPORTSDATAIO_NBA_KEY → SPORTSDATAIO_NHL_KEY → SPORTSDATAIO_CBB_KEY
+ * One key works for all leagues — SportsDataIO uses the same key across sports on a given subscription.
+ */
+function getSdioApiKey(): string | undefined {
+  return (
+    process.env.SPORTSDATAIO_API_KEY ||
+    process.env.SPORTSDATAIO_NBA_KEY ||
+    process.env.SPORTSDATAIO_NHL_KEY ||
+    process.env.SPORTSDATAIO_CBB_KEY ||
+    undefined
+  )
+}
+
 // ─── League config ─────────────────────────────────────────────────────────────
 
 interface LeagueConfig {
   sdioKey: string          // URL segment: nba | nhl | cbb
-  envVar: string           // env var holding the API key
   league: string           // our internal label: NBA | NHL | NCAAB
   sport: string            // our internal label: Basketball | Hockey
 }
 
 const SDIO_LEAGUES: LeagueConfig[] = [
-  { sdioKey: 'nba', envVar: 'SPORTSDATAIO_NBA_KEY', league: 'NBA',   sport: 'Basketball' },
-  { sdioKey: 'nhl', envVar: 'SPORTSDATAIO_NHL_KEY', league: 'NHL',   sport: 'Hockey'     },
-  { sdioKey: 'cbb', envVar: 'SPORTSDATAIO_CBB_KEY', league: 'NCAAB', sport: 'Basketball' },
+  { sdioKey: 'nba', league: 'NBA',   sport: 'Basketball' },
+  { sdioKey: 'nhl', league: 'NHL',   sport: 'Hockey'     },
+  { sdioKey: 'cbb', league: 'NCAAB', sport: 'Basketball' },
 ]
 
 // ─── SportsDataIO response types ───────────────────────────────────────────────
@@ -315,25 +330,24 @@ export async function refreshOddsCacheFromSdio(): Promise<SdioRefreshResult> {
   let totalFetched  = 0
   let totalUpserted = 0
 
-  // Only process leagues that have an API key configured
-  const configuredLeagues = SDIO_LEAGUES.filter((l) => !!process.env[l.envVar])
-
-  if (!configuredLeagues.length) {
+  const apiKey = getSdioApiKey()
+  if (!apiKey) {
     return {
       success: false,
       totalFetched: 0,
       totalUpserted: 0,
       leaguesRefreshed: [],
-      errors: ['No SPORTSDATAIO_*_KEY env vars set — cannot refresh from SportsDataIO'],
+      errors: ['No SPORTSDATAIO_API_KEY env var set — cannot refresh from SportsDataIO'],
       refreshedAt: new Date().toISOString(),
     }
   }
+
+  const configuredLeagues = SDIO_LEAGUES
 
   console.info(`[sportsDataIOService] Starting refresh for leagues: ${configuredLeagues.map((l) => l.league).join(', ')}`)
 
   await Promise.allSettled(
     configuredLeagues.map(async (config) => {
-      const apiKey = process.env[config.envVar]!
       try {
         const { rows, gameCount } = await fetchLeagueData(config, apiKey)
         totalFetched += gameCount
@@ -378,14 +392,14 @@ export async function refreshOddsCacheFromSdio(): Promise<SdioRefreshResult> {
  * Returns true if at least one SportsDataIO key is configured.
  */
 export function isSdioConfigured(): boolean {
-  return SDIO_LEAGUES.some((l) => !!process.env[l.envVar])
+  return !!getSdioApiKey()
 }
 
 /**
  * Returns the list of leagues covered by SportsDataIO given current env keys.
  */
 export function getSdioConfiguredLeagues(): string[] {
-  return SDIO_LEAGUES.filter((l) => !!process.env[l.envVar]).map((l) => l.league)
+  return getSdioApiKey() ? SDIO_LEAGUES.map((l) => l.league) : []
 }
 
 // ─── Score fetching ─────────────────────────────────────────────────────────────
@@ -401,10 +415,11 @@ export async function fetchSdioScores(): Promise<{
   const errors: string[] = []
   const scores: SdioScoreRow[] = []
 
-  const configuredLeagues = SDIO_LEAGUES.filter((l) => !!process.env[l.envVar])
-  if (!configuredLeagues.length) {
-    return { scores: [], errors: ['No SPORTSDATAIO_*_KEY env vars configured'] }
+  const apiKey = getSdioApiKey()
+  if (!apiKey) {
+    return { scores: [], errors: ['No SPORTSDATAIO_API_KEY env var configured'] }
   }
+  const configuredLeagues = SDIO_LEAGUES
 
   // Fetch yesterday + today to catch late-finishing games
   const now = new Date()
@@ -415,7 +430,6 @@ export async function fetchSdioScores(): Promise<{
   await Promise.allSettled(
     configuredLeagues.flatMap((config) =>
       dates.map(async (dateStr) => {
-        const apiKey = process.env[config.envVar]!
         try {
           const games = await fetchGamesByDate(config.sdioKey, apiKey, dateStr)
           const completed = games.filter(
@@ -544,14 +558,14 @@ export async function fetchAllInjuries(): Promise<{
   const errors: string[] = []
   const all: SdioInjuryPlayer[] = []
 
-  const configuredLeagues = SDIO_LEAGUES.filter((l) => !!process.env[l.envVar])
-  if (!configuredLeagues.length) {
-    return { injuries: [], errors: ['No SPORTSDATAIO_*_KEY env vars configured'] }
+  const apiKey = getSdioApiKey()
+  if (!apiKey) {
+    return { injuries: [], errors: ['No SPORTSDATAIO_API_KEY env var configured'] }
   }
+  const configuredLeagues = SDIO_LEAGUES
 
   await Promise.allSettled(
     configuredLeagues.map(async (config) => {
-      const apiKey = process.env[config.envVar]!
       try {
         const players = await fetchInjuriesForLeague(config, apiKey)
         all.push(...players)
@@ -700,17 +714,17 @@ export async function fetchBettingSplits(): Promise<{
   const errors: string[] = []
   const all: SdioBettingSplit[] = []
 
-  const configuredLeagues = SDIO_LEAGUES.filter((l) => !!process.env[l.envVar])
-  if (!configuredLeagues.length) {
-    return { splits: [], errors: ['No SPORTSDATAIO_*_KEY env vars configured'] }
+  const apiKey = getSdioApiKey()
+  if (!apiKey) {
+    return { splits: [], errors: ['No SPORTSDATAIO_API_KEY env var configured'] }
   }
+  const configuredLeagues = SDIO_LEAGUES
 
   const dates = getSdioFetchDates()
 
   await Promise.allSettled(
     configuredLeagues.flatMap((config) =>
       dates.map(async (dateStr) => {
-        const apiKey = process.env[config.envVar]!
         try {
           const splits = await fetchBettingSplitsForLeague(config, apiKey, dateStr)
           all.push(...splits)
@@ -816,6 +830,128 @@ export async function fetchLineupConfirmations(_league: string): Promise<SdioLin
   console.info('[sportsDataIOService] fetchLineupConfirmations: stub — not yet implemented')
   return []
 }
+
+// ─── Cache-write functions ───────────────────────────────────────────────────────
+
+export interface CacheInjuriesResult {
+  cached: number
+  errors: string[]
+  cachedAt: string
+}
+
+/**
+ * Fetch injuries from SportsDataIO and write them to the cached_injuries table.
+ * Performs a full replace per league (delete + insert) so stale players are removed.
+ */
+export async function cacheInjuries(): Promise<CacheInjuriesResult> {
+  const { injuries, errors } = await fetchAllInjuries()
+  const cachedAt = new Date().toISOString()
+
+  if (!injuries.length) {
+    return { cached: 0, errors, cachedAt }
+  }
+
+  // Group by league and replace each league's rows atomically
+  const byLeague = new Map<string, SdioInjuryPlayer[]>()
+  for (const inj of injuries) {
+    const arr = byLeague.get(inj.league) ?? []
+    arr.push(inj)
+    byLeague.set(inj.league, arr)
+  }
+
+  const upsertErrors: string[] = [...errors]
+  let totalCached = 0
+
+  for (const [league, players] of byLeague) {
+    try {
+      // Delete existing rows for this league
+      await supabaseAdmin.from('cached_injuries').delete().eq('league', league)
+
+      // Insert new rows
+      const rows = players.map((p) => ({
+        player_id:       String(p.playerId),
+        player_name:     p.playerName,
+        team:            p.team,
+        team_name:       p.teamName,
+        league:          p.league,
+        position:        p.position,
+        injury_type:     p.injuryType,
+        injury_desc:     p.injuryDesc,
+        status:          p.status,
+        expected_return: p.expectedReturn,
+        impact_score:    p.impactScore,
+        last_updated:    cachedAt,
+      }))
+
+      const { error } = await supabaseAdmin.from('cached_injuries').insert(rows)
+      if (error) {
+        upsertErrors.push(`${league} insert: ${error.message}`)
+      } else {
+        totalCached += rows.length
+        console.info(`[sportsDataIOService] cacheInjuries ${league}: ${rows.length} rows written`)
+      }
+    } catch (err) {
+      upsertErrors.push(`${league}: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  return { cached: totalCached, errors: upsertErrors, cachedAt }
+}
+
+export interface CacheBettingSplitsResult {
+  cached: number
+  errors: string[]
+  cachedAt: string
+}
+
+/**
+ * Fetch betting splits from SportsDataIO and write them to the cached_betting_splits table.
+ * Uses upsert on game_id so re-runs are safe.
+ */
+export async function cacheBettingSplits(): Promise<CacheBettingSplitsResult> {
+  const { splits, errors } = await fetchBettingSplits()
+  const cachedAt = new Date().toISOString()
+
+  if (!splits.length) {
+    return { cached: 0, errors, cachedAt }
+  }
+
+  const rows = splits.map((s) => ({
+    game_id:           s.gameId,
+    league:            s.league,
+    home_team:         s.homeTeam,
+    away_team:         s.awayTeam,
+    spread_home_bets:  s.spreadHomeBeats,
+    spread_away_bets:  s.spreadAwayBets,
+    spread_home_money: s.spreadHomeMoney,
+    spread_away_money: s.spreadAwayMoney,
+    ml_home_bets:      s.mlHomeBets,
+    ml_away_bets:      s.mlAwayBets,
+    ml_home_money:     s.mlHomeMoney,
+    ml_away_money:     s.mlAwayMoney,
+    over_bets:         s.overBets,
+    under_bets:        s.underBets,
+    opening_spread:    s.openingSpread,
+    current_spread:    s.currentSpread,
+    opening_total:     s.openingTotal,
+    current_total:     s.currentTotal,
+    last_updated:      cachedAt,
+  }))
+
+  const { error } = await supabaseAdmin
+    .from('cached_betting_splits')
+    .upsert(rows, { onConflict: 'game_id' })
+
+  if (error) {
+    console.error('[sportsDataIOService] cacheBettingSplits upsert error:', error.message)
+    return { cached: 0, errors: [...errors, error.message], cachedAt }
+  }
+
+  console.info(`[sportsDataIOService] cacheBettingSplits: ${rows.length} rows upserted`)
+  return { cached: rows.length, errors, cachedAt }
+}
+
+// ─── Sharp money + line movement analysis ───────────────────────────────────────
 
 /**
  * Compute sharp money indicators and line movement alerts from a betting split.

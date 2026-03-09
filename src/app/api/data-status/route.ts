@@ -8,7 +8,7 @@ export async function GET() {
   const { start, end } = getTodaySlateRange()
 
   // Run DB queries in parallel
-  const [oddsResult, engineResult, gradeResult, slateRows, officialPicksResult] = await Promise.all([
+  const [oddsResult, engineResult, gradeResult, slateRows, officialPicksResult, injuriesResult, splitsResult] = await Promise.all([
     supabaseAdmin
       .from('cached_odds')
       .select('last_updated')
@@ -40,6 +40,20 @@ export async function GET() {
       .from('official_picks')
       .select('id, result, league, commence_time')
       .lt('commence_time', end),
+    // Last cached injuries timestamp
+    supabaseAdmin
+      .from('cached_injuries')
+      .select('last_updated')
+      .order('last_updated', { ascending: false })
+      .limit(1)
+      .single(),
+    // Last cached betting splits timestamp
+    supabaseAdmin
+      .from('cached_betting_splits')
+      .select('last_updated')
+      .order('last_updated', { ascending: false })
+      .limit(1)
+      .single(),
   ])
 
   // JS-filter for lower bound
@@ -62,6 +76,8 @@ export async function GET() {
   const lastPickGradeAt: string | null = gradeResult.data?.result_recorded_at ?? null
   const gamesInSlate: number = slateGames.length
   const lastRunNotes = engineResult.data?.notes ?? null
+  const injuriesUpdatedAt: string | null = injuriesResult.data?.last_updated ?? null
+  const bettingSplitsUpdatedAt: string | null = splitsResult.data?.last_updated ?? null
 
   let nextRefreshInMinutes: number | null = null
   if (oddsUpdatedAt) {
@@ -81,5 +97,7 @@ export async function GET() {
     officialPicksToday: picksTotal,
     officialPicksPending: picksPending,
     lastRunNotes,
+    injuriesUpdatedAt,
+    bettingSplitsUpdatedAt,
   })
 }

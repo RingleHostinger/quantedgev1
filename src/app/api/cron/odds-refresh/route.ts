@@ -22,6 +22,7 @@ import { supabaseAdmin } from '@/integrations/supabase/server'
 import { refreshOddsCache, fetchAndUpdateGameScores } from '@/lib/oddsCacheService'
 import { syncOddsToGamesAndPredictions } from '@/lib/oddsSyncService'
 import { resolveOfficialPickResults, updateClosingLines } from '@/lib/officialPicksService'
+import { cacheInjuries, cacheBettingSplits, isSdioConfigured } from '@/lib/sportsDataIOService'
 
 async function isAuthorized(req: NextRequest): Promise<boolean> {
   const session = await getSession()
@@ -108,6 +109,21 @@ export async function POST(req: NextRequest) {
     scoresResult = { updated: 0, errors: [String(err)] }
   }
 
+  // ── Step 5a: Cache injuries from SportsDataIO ─────────────────────────────
+  let injuriesResult: { cached: number; errors: string[]; cachedAt: string } = { cached: 0, errors: [], cachedAt: '' }
+  let splitsResult: { cached: number; errors: string[]; cachedAt: string } = { cached: 0, errors: [], cachedAt: '' }
+  if (isSdioConfigured()) {
+    try {
+      [injuriesResult, splitsResult] = await Promise.all([
+        cacheInjuries(),
+        cacheBettingSplits(),
+      ])
+      console.log('[cron/odds-refresh] Injuries cached:', injuriesResult.cached, '| Splits cached:', splitsResult.cached)
+    } catch (err) {
+      console.warn('[cron/odds-refresh] Injury/splits cache error:', err)
+    }
+  }
+
   // ── Step 5: Grade pending official picks ──────────────────────────────────
   // Runs after score fetch so any newly-final games are immediately gradeable.
   let gradingResult: { resolved: number; errors: string[] } = { resolved: 0, errors: [] }
@@ -140,6 +156,8 @@ export async function POST(req: NextRequest) {
         oddsErrors: (oddsResult as { errors?: string[] }).errors?.slice(0, 3) ?? [],
         sportsRefreshed: (oddsResult as { sportsRefreshed?: string[] }).sportsRefreshed ?? [],
         syncErrors: syncResult && 'error' in syncResult ? [(syncResult as { error: string }).error] : [],
+        injuriesCached: injuriesResult.cached,
+        splitsCached: splitsResult.cached,
       }),
     })
   } catch (logErr) {

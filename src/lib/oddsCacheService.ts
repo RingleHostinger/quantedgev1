@@ -407,10 +407,11 @@ export async function refreshOddsCache(): Promise<RefreshResult> {
   const sdioLeagues = sdioEnabled ? getSdioConfiguredLeagues() : []
 
   // Which TheOddsAPI sport keys are still needed?
+  // Fall back for: leagues outside SDIO scope, OR leagues SDIO claimed but failed to refresh
   const fallbackSportKeys = sdioEnabled
     ? SPORT_KEYS.filter((key) => {
         const league = SPORT_MAP[key]?.league
-        return !league || !sdioLeagues.includes(league)
+        return !league || !sdioLeagues.includes(league) || !sportsRefreshed.includes(league)
       })
     : SPORT_KEYS
 

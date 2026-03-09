@@ -120,9 +120,7 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <p className="text-center text-xs mt-6" style={{ color: '#A0A0B0' }}>
-          Demo: john@example.com / any password
-        </p>
+
       </div>
     </div>
   )

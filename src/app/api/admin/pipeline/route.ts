@@ -30,6 +30,7 @@ import {
   selectAndInsertOfficialPicks,
 } from '@/lib/officialPicksService'
 import { getTodaySlateGameIds, getTodaySlateRange, filterToWindow } from '@/lib/slateUtils'
+import { cacheInjuries, cacheBettingSplits, isSdioConfigured } from '@/lib/sportsDataIOService'
 
 async function verifyAdmin(): Promise<boolean> {
   const session = await getSession()
@@ -129,6 +130,42 @@ async function doGradePicks() {
   }
 }
 
+async function doRefreshInjuries() {
+  const start = Date.now()
+  if (!isSdioConfigured()) {
+    return { step: 'refresh_injuries', success: false, durationMs: 0, error: 'SportsDataIO not configured' }
+  }
+  try {
+    const result = await cacheInjuries()
+    return {
+      step: 'refresh_injuries',
+      success: result.errors.length === 0,
+      durationMs: Date.now() - start,
+      detail: { cached: result.cached, cachedAt: result.cachedAt, errors: result.errors },
+    }
+  } catch (err) {
+    return { step: 'refresh_injuries', success: false, durationMs: Date.now() - start, error: String(err) }
+  }
+}
+
+async function doRefreshBettingSplits() {
+  const start = Date.now()
+  if (!isSdioConfigured()) {
+    return { step: 'refresh_betting_splits', success: false, durationMs: 0, error: 'SportsDataIO not configured' }
+  }
+  try {
+    const result = await cacheBettingSplits()
+    return {
+      step: 'refresh_betting_splits',
+      success: result.errors.length === 0,
+      durationMs: Date.now() - start,
+      detail: { cached: result.cached, cachedAt: result.cachedAt, errors: result.errors },
+    }
+  } catch (err) {
+    return { step: 'refresh_betting_splits', success: false, durationMs: Date.now() - start, error: String(err) }
+  }
+}
+
 // ── Route handlers ──────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
@@ -180,6 +217,16 @@ export async function POST(req: NextRequest) {
       })
     }
 
+    if (action === 'refresh_injuries') {
+      const result = await doRefreshInjuries()
+      return NextResponse.json({ success: result.success, results: [result], totalDurationMs: Date.now() - totalStart })
+    }
+
+    if (action === 'refresh_betting_splits') {
+      const result = await doRefreshBettingSplits()
+      return NextResponse.json({ success: result.success, results: [result], totalDurationMs: Date.now() - totalStart })
+    }
+
     if (action === 'full_cycle') {
       // Run all steps in sequence
       const results = []
@@ -195,6 +242,12 @@ export async function POST(req: NextRequest) {
 
       const gradeResult = await doGradePicks()
       results.push(gradeResult)
+
+      const injuriesResult = await doRefreshInjuries()
+      results.push(injuriesResult)
+
+      const splitsResult = await doRefreshBettingSplits()
+      results.push(splitsResult)
 
       const anyFailed = results.some((r) => !r.success)
       return NextResponse.json({

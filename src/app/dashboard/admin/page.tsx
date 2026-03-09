@@ -768,6 +768,20 @@ export default function AdminPage() {
                       icon: Star,
                       color: '#F59E0B',
                     },
+                    {
+                      action: 'refresh_injuries',
+                      label: 'Refresh Injuries Cache',
+                      description: 'Fetch latest injury report from SportsDataIO and update cached_injuries table',
+                      icon: Database,
+                      color: '#F97316',
+                    },
+                    {
+                      action: 'refresh_betting_splits',
+                      label: 'Refresh Betting Splits Cache',
+                      description: 'Fetch today\'s public betting splits from SportsDataIO and update cached_betting_splits table',
+                      icon: BarChart3,
+                      color: '#8B5CF6',
+                    },
                   ].map(({ action, label, description, icon: Icon, color }) => (
                     <button
                       key={action}

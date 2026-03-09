@@ -2,7 +2,10 @@ import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/integrations/supabase/server'
 import { getSession } from '@/lib/auth'
 import { getTodaySlateGameIds, filterToWindow } from '@/lib/slateUtils'
-import { fetchBettingSplits, analyzeBettingSplit, fetchAllInjuries, isSdioConfigured } from '@/lib/sportsDataIOService'
+import { analyzeBettingSplit, SdioBettingSplit } from '@/lib/sportsDataIOService'
+
+const SPLITS_STALE_MINUTES = 60
+const INJURIES_STALE_MINUTES = 90
 
 export async function GET() {
   const session = await getSession()
@@ -61,9 +64,8 @@ export async function GET() {
 
   const modelUpdatedAt = lastRun?.run_at ?? null
 
-  // ─── Enrich with betting splits + injuries (SDIO) ─────────────────────────────
-  // Fetch in parallel, gracefully degrade if not available
-  let splitsMap = new Map<string, ReturnType<typeof analyzeBettingSplit> & {
+  // ─── Load splits from cached_betting_splits table ────────────────────────────
+  type SplitEntry = ReturnType<typeof analyzeBettingSplit> & {
     spreadHomeBeats: number | null
     spreadAwayBets: number | null
     spreadHomeMoney: number | null
@@ -72,22 +74,43 @@ export async function GET() {
     currentSpread: number | null
     openingTotal: number | null
     currentTotal: number | null
-  }>()
+  }
+  let splitsMap = new Map<string, SplitEntry>()
 
-  // Build a map of team name → high-impact injuries (Out/IR, impactScore >= 6)
-  let injuryMap = new Map<string, { playerName: string; status: string; impactScore: number }[]>()
+  const { data: splitsRows } = await supabaseAdmin
+    .from('cached_betting_splits')
+    .select('*')
+    .order('last_updated', { ascending: false })
 
-  if (isSdioConfigured()) {
-    const [splitsResult, injuriesResult] = await Promise.allSettled([
-      fetchBettingSplits(),
-      fetchAllInjuries(),
-    ])
+  if (splitsRows && splitsRows.length > 0) {
+    const mostRecent = splitsRows[0].last_updated as string | null
+    const ageMs = mostRecent ? Date.now() - new Date(mostRecent).getTime() : Infinity
+    const isStale = ageMs > SPLITS_STALE_MINUTES * 60 * 1000
 
-    if (splitsResult.status === 'fulfilled') {
-      const { splits } = splitsResult.value
-      for (const split of splits) {
+    if (!isStale) {
+      for (const r of splitsRows) {
+        const split: SdioBettingSplit = {
+          gameId:          r.game_id,
+          league:          r.league,
+          homeTeam:        r.home_team,
+          awayTeam:        r.away_team,
+          spreadHomeBeats: r.spread_home_bets,
+          spreadAwayBets:  r.spread_away_bets,
+          spreadHomeMoney: r.spread_home_money,
+          spreadAwayMoney: r.spread_away_money,
+          mlHomeBets:      r.ml_home_bets,
+          mlAwayBets:      r.ml_away_bets,
+          mlHomeMoney:     r.ml_home_money,
+          mlAwayMoney:     r.ml_away_money,
+          overBets:        r.over_bets,
+          underBets:       r.under_bets,
+          openingSpread:   r.opening_spread,
+          currentSpread:   r.current_spread,
+          openingTotal:    r.opening_total,
+          currentTotal:    r.current_total,
+        }
         const analysis = analyzeBettingSplit(split)
-        splitsMap.set(split.gameId, {
+        splitsMap.set(r.game_id, {
           ...analysis,
           spreadHomeBeats:  split.spreadHomeBeats,
           spreadAwayBets:   split.spreadAwayBets,
@@ -100,19 +123,33 @@ export async function GET() {
         })
       }
     }
+  }
 
-    if (injuriesResult.status === 'fulfilled') {
-      const { injuries } = injuriesResult.value
-      // Build team → high-impact injured players map
-      for (const inj of injuries) {
-        if (inj.impactScore < 6) continue
-        if (inj.status !== 'Out' && inj.status !== 'IR' && inj.status !== 'Day-To-Day') continue
-        const key = inj.teamName.toLowerCase()
+  // ─── Load injuries from cached_injuries table ────────────────────────────────
+  let injuryMap = new Map<string, { playerName: string; status: string; impactScore: number }[]>()
+
+  const { data: injuryRows } = await supabaseAdmin
+    .from('cached_injuries')
+    .select('player_name, team_name, team, status, impact_score, last_updated')
+    .order('impact_score', { ascending: false })
+
+  if (injuryRows && injuryRows.length > 0) {
+    const mostRecent = injuryRows[0].last_updated as string | null
+    const ageMs = mostRecent ? Date.now() - new Date(mostRecent).getTime() : Infinity
+    const isStale = ageMs > INJURIES_STALE_MINUTES * 60 * 1000
+
+    if (!isStale) {
+      for (const inj of injuryRows) {
+        const impactScore = Number(inj.impact_score ?? 0)
+        if (impactScore < 6) continue
+        const status = inj.status as string
+        if (status !== 'Out' && status !== 'IR' && status !== 'Day-To-Day') continue
+        const key = ((inj.team_name ?? inj.team) as string).toLowerCase()
         if (!injuryMap.has(key)) injuryMap.set(key, [])
         injuryMap.get(key)!.push({
-          playerName: inj.playerName,
-          status: inj.status,
-          impactScore: inj.impactScore,
+          playerName:  inj.player_name as string,
+          status,
+          impactScore,
         })
       }
     }
@@ -122,7 +159,6 @@ export async function GET() {
   const heatmap = qualified.map((row) => {
     const splits = splitsMap.get(row.game_id) ?? null
 
-    // Look up injuries for home/away teams
     const homeKey = (row.home_team ?? '').toLowerCase()
     const awayKey = (row.away_team ?? '').toLowerCase()
     const homeInjuries = injuryMap.get(homeKey) ?? []
