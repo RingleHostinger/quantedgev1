@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Brain, TrendingUp, Shield, Zap, Star, ChevronRight, Target, BarChart3, Users, Trophy } from 'lucide-react'
+import { Brain, TrendingUp, Shield, Zap, Star, ChevronRight, Target, BarChart3, Users, Trophy, Check, Lock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { QuantEdgeLogo } from '@/components/QuantEdgeLogo'
@@ -25,7 +25,7 @@ export default function LandingPage() {
           <div className="hidden md:flex items-center gap-8">
             <a href="#features" className="text-sm transition-colors hover:text-white" style={{ color: '#A0A0B0' }}>Features</a>
             <a href="#predictions" className="text-sm transition-colors hover:text-white" style={{ color: '#A0A0B0' }}>Predictions</a>
-            <a href="#pricing" className="text-sm transition-colors hover:text-white" style={{ color: '#A0A0B0' }}>Pricing</a>
+            <Link href="/pricing" className="text-sm transition-colors hover:text-white" style={{ color: '#A0A0B0' }}>Pricing</Link>
           </div>
           <div className="flex items-center gap-3">
             <Link href="/login">
@@ -148,59 +148,142 @@ export default function LandingPage() {
 
       {/* Pricing */}
       <section id="pricing" className="px-6 py-20">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-16">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center mb-12">
             <h2 className="text-4xl font-bold mb-4" style={{ color: '#E6E6FA' }}>Simple, Transparent Pricing</h2>
-            <p style={{ color: '#A0A0B0' }}>Start free, upgrade when you&apos;re ready</p>
+            <p style={{ color: '#A0A0B0' }}>Start free with 1 AI pick per day. Upgrade for full access.</p>
           </div>
-          <div className="grid md:grid-cols-2 gap-8 max-w-3xl mx-auto">
+
+          <div className="grid md:grid-cols-3 gap-5">
             {/* Free */}
-            <div className="glass-card rounded-2xl p-8">
-              <div className="text-sm font-semibold mb-2" style={{ color: '#A0A0B0' }}>FREE</div>
-              <div className="text-4xl font-bold mb-1" style={{ color: '#E6E6FA' }}>$0</div>
-              <div className="text-sm mb-8" style={{ color: '#A0A0B0' }}>Forever free</div>
-              <ul className="space-y-3 mb-8">
-                {['1–3 AI picks per day', 'Basic team stats', 'Limited insights', 'Community access'].map((f) => (
-                  <li key={f} className="flex items-center gap-3 text-sm" style={{ color: '#A0A0B0' }}>
-                    <div className="w-4 h-4 rounded-full bg-white/10 flex items-center justify-center flex-shrink-0">
-                      <span className="text-xs">✓</span>
+            <div className="rounded-2xl p-6 flex flex-col"
+              style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <div className="mb-5">
+                <div className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: '#6B6B80' }}>Free</div>
+                <div className="flex items-baseline gap-1 mb-1">
+                  <span className="text-4xl font-black" style={{ color: '#E6E6FA' }}>$0</span>
+                </div>
+                <p className="text-sm" style={{ color: '#6B6B80' }}>Forever free</p>
+              </div>
+              <ul className="space-y-2.5 mb-7 flex-1">
+                {['1 free AI pick per day', 'Limited predictions access', 'Basic game analysis', 'Win probability view'].map((f) => (
+                  <li key={f} className="flex items-center gap-3 text-sm">
+                    <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+                      style={{ background: 'rgba(160,160,176,0.15)' }}>
+                      <Check className="w-3 h-3" style={{ color: '#A0A0B0' }} />
                     </div>
-                    {f}
+                    <span style={{ color: '#A0A0B0' }}>{f}</span>
+                  </li>
+                ))}
+                {['Bracket Lab', 'Survivor Pool AI', 'Top AI Edges'].map((f) => (
+                  <li key={f} className="flex items-center gap-3 text-sm opacity-40">
+                    <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+                      style={{ background: 'rgba(255,255,255,0.05)' }}>
+                      <Lock className="w-3 h-3" style={{ color: '#6B6B80' }} />
+                    </div>
+                    <span style={{ color: '#6B6B80' }}>{f}</span>
                   </li>
                 ))}
               </ul>
               <Link href="/signup">
-                <Button className="w-full" variant="outline" style={{ borderColor: 'rgba(255,255,255,0.2)', color: '#E6E6FA' }}>
-                  Get Started Free
+                <Button variant="outline" className="w-full border-white/10 hover:border-white/20" style={{ color: '#E6E6FA' }}>
+                  Create Free Account
+                </Button>
+              </Link>
+            </div>
+
+            {/* Madness Special */}
+            <div className="rounded-2xl p-6 flex flex-col"
+              style={{
+                background: 'linear-gradient(135deg, rgba(245,158,11,0.07), rgba(251,191,36,0.05))',
+                border: '1px solid rgba(245,158,11,0.25)',
+              }}>
+              <div className="mb-5">
+                <div className="flex items-center gap-2 mb-3">
+                  <Trophy className="w-4 h-4" style={{ color: '#F59E0B' }} />
+                  <div className="text-xs font-bold uppercase tracking-widest" style={{ color: '#F59E0B' }}>Madness Special</div>
+                </div>
+                <div className="flex items-baseline gap-1 mb-1">
+                  <span className="text-4xl font-black" style={{ color: '#E6E6FA' }}>$19.99</span>
+                  <span className="text-base" style={{ color: '#6B6B80' }}>/month</span>
+                </div>
+                <p className="text-sm" style={{ color: '#6B6B80' }}>March Madness tools only</p>
+              </div>
+              <ul className="space-y-2.5 mb-7 flex-1">
+                {['Bracket Lab — AI bracket builder & grader', 'Survivor Pool AI — round strategy engine', 'AI win probability per team', 'Upset radar & pool strategy', 'Bracket optimizer (3 AI versions)', 'Duplicate risk & uniqueness scoring'].map((f) => (
+                  <li key={f} className="flex items-center gap-3 text-sm">
+                    <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+                      style={{ background: 'rgba(245,158,11,0.2)' }}>
+                      <Check className="w-3 h-3" style={{ color: '#F59E0B' }} />
+                    </div>
+                    <span style={{ color: '#E6E6FA' }}>{f}</span>
+                  </li>
+                ))}
+                {['Top AI Edges', 'Betting Heat Map', 'Daily AI Briefing'].map((f) => (
+                  <li key={f} className="flex items-center gap-3 text-sm opacity-40">
+                    <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+                      style={{ background: 'rgba(255,255,255,0.05)' }}>
+                      <Lock className="w-3 h-3" style={{ color: '#6B6B80' }} />
+                    </div>
+                    <span style={{ color: '#6B6B80' }}>{f}</span>
+                  </li>
+                ))}
+              </ul>
+              <Link href="/signup?plan=madness">
+                <Button className="w-full font-black border-0 hover:opacity-90 py-4 text-sm"
+                  style={{ background: 'rgba(245,158,11,0.9)', color: '#0F0F1A' }}>
+                  <Trophy className="w-4 h-4 mr-2" />
+                  Get Madness Special
                 </Button>
               </Link>
             </div>
 
             {/* Premium */}
-            <div className="rounded-2xl p-8 relative" style={{ background: 'linear-gradient(135deg, rgba(0,255,163,0.15), rgba(59,130,246,0.15))', border: '1px solid rgba(0,255,163,0.3)' }}>
-              <div className="absolute top-4 right-4">
-                <Badge style={{ background: '#00FFA3', color: '#0F0F1A' }} className="text-xs font-bold">POPULAR</Badge>
+            <div className="rounded-2xl p-6 flex flex-col relative"
+              style={{
+                background: 'linear-gradient(135deg, rgba(0,255,163,0.07), rgba(59,130,246,0.07))',
+                border: '1px solid rgba(0,255,163,0.28)',
+                boxShadow: '0 0 30px rgba(0,255,163,0.06)',
+              }}>
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                <div className="text-xs font-black px-4 py-1 rounded-full"
+                  style={{ background: '#00FFA3', color: '#0F0F1A' }}>
+                  Most Popular
+                </div>
               </div>
-              <div className="text-sm font-semibold mb-2" style={{ color: '#00FFA3' }}>PREMIUM</div>
-              <div className="text-4xl font-bold mb-1" style={{ color: '#E6E6FA' }}>$19.99</div>
-              <div className="text-sm mb-8" style={{ color: '#A0A0B0' }}>per month</div>
-              <ul className="space-y-3 mb-8">
-                {['Unlimited AI picks', 'Full AI analysis reports', 'Advanced team/player trends', 'Confidence scores & reasoning', 'Injury impact analysis', 'Priority feature updates'].map((f) => (
-                  <li key={f} className="flex items-center gap-3 text-sm" style={{ color: '#E6E6FA' }}>
-                    <div className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(0,255,163,0.2)' }}>
-                      <span className="text-xs" style={{ color: '#00FFA3' }}>✓</span>
+              <div className="mb-5">
+                <div className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: '#00FFA3' }}>Premium</div>
+                <div className="flex items-baseline gap-1 mb-1">
+                  <span className="text-4xl font-black" style={{ color: '#E6E6FA' }}>$39.99</span>
+                  <span className="text-base" style={{ color: '#6B6B80' }}>/month</span>
+                </div>
+                <p className="text-sm" style={{ color: '#6B6B80' }}>Full platform access · Cancel anytime</p>
+              </div>
+              <ul className="space-y-2.5 mb-7 flex-1">
+                {['Everything in Madness Special', 'Full Top AI Edges access', 'Upset Radar', 'Betting Heat Map', 'Daily AI Briefing', 'Model Performance tracking', 'All predictions unlocked', 'Unlimited AI picks'].map((f) => (
+                  <li key={f} className="flex items-center gap-3 text-sm">
+                    <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+                      style={{ background: 'rgba(0,255,163,0.2)' }}>
+                      <Check className="w-3 h-3" style={{ color: '#00FFA3' }} />
                     </div>
-                    {f}
+                    <span style={{ color: '#E6E6FA' }}>{f}</span>
                   </li>
                 ))}
               </ul>
-              <Link href="/signup">
-                <Button className="w-full gradient-green text-black font-semibold border-0 hover:opacity-90 neon-glow">
-                  Upgrade to Premium
-                  <Star className="w-4 h-4 ml-2" />
+              <Link href="/signup?plan=premium">
+                <Button className="w-full gradient-green text-black font-black border-0 hover:opacity-90 neon-glow py-4 text-sm">
+                  <Star className="w-4 h-4 mr-2" />
+                  Get Premium
                 </Button>
               </Link>
             </div>
+          </div>
+
+          <div className="text-center mt-8">
+            <Link href="/pricing" className="text-sm font-medium hover:underline transition-colors"
+              style={{ color: '#00FFA3' }}>
+              View full pricing details &amp; FAQ →
+            </Link>
           </div>
         </div>
       </section>
