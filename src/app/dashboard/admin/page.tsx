@@ -39,7 +39,7 @@ interface User {
   created_at: string
 }
 
-type Tab = 'overview' | 'games' | 'predictions' | 'free-pick' | 'users' | 'visibility' | 'briefing' | 'injuries-admin' | 'overrides' | 'bracket-model' | 'bracket-mgmt' | 'pipeline' | 'grading' | 'survivor-test'
+type Tab = 'overview' | 'games' | 'predictions' | 'free-pick' | 'users' | 'visibility' | 'briefing' | 'injuries-admin' | 'overrides' | 'bracket-model' | 'bracket-mgmt' | 'pipeline' | 'grading' | 'survivor-test' | 'survivor-grading'
 
 interface PipelineStatus {
   lastOddsRefresh: string | null
@@ -161,6 +161,88 @@ export default function AdminPage() {
   const [survivorTestMode, setSurvivorTestMode] = useState(false)
   const [survivorTestLoading, setSurvivorTestLoading] = useState(false)
   const [survivorTestMsg, setSurvivorTestMsg] = useState('')
+
+  // Survivor grading
+  interface SurvivorPickAdmin {
+    id: string
+    pool_id: string
+    user_id: string
+    round_number: number
+    team_name: string
+    team_seed: number | null
+    opponent_name: string | null
+    win_probability: number | null
+    result: string
+    created_at: string
+    updated_at: string
+    survivor_pools: { pool_name: string; pool_size: string; strike_rule: string; pick_format: string } | null
+    users: { email: string; name: string } | null
+  }
+  const [survivorPicks, setSurvivorPicks] = useState<SurvivorPickAdmin[]>([])
+  const [survivorGradingLoading, setSurvivorGradingLoading] = useState(false)
+  const [survivorGradingFilter, setSurvivorGradingFilter] = useState<'all' | 'pending' | 'won' | 'eliminated'>('pending')
+  const [survivorGradingAction, setSurvivorGradingAction] = useState<string | null>(null)
+  const [survivorGradingMsg, setSurvivorGradingMsg] = useState('')
+  // Bulk grader state
+  const [bulkTeamName, setBulkTeamName] = useState('')
+  const [bulkResult, setBulkResult] = useState<'won' | 'eliminated'>('won')
+  const [bulkGrading, setBulkGrading] = useState(false)
+
+  const loadSurvivorPicks = async (filter = survivorGradingFilter) => {
+    setSurvivorGradingLoading(true)
+    setSurvivorGradingMsg('')
+    try {
+      const params = new URLSearchParams()
+      if (filter !== 'all') params.set('result', filter)
+      const res = await fetch(`/api/admin/survivor-grade?${params}`)
+      const data = await res.json()
+      if (!res.ok) { setSurvivorGradingMsg(data.error || 'Failed to load picks'); return }
+      setSurvivorPicks(data.picks ?? [])
+    } catch { setSurvivorGradingMsg('Error loading survivor picks') }
+    finally { setSurvivorGradingLoading(false) }
+  }
+
+  const handleSurvivorGradePick = async (pickId: string, result: 'won' | 'eliminated' | 'pending') => {
+    setSurvivorGradingAction(pickId + result)
+    setSurvivorGradingMsg('')
+    try {
+      const res = await fetch('/api/admin/survivor-grade', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pick_id: pickId, result }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setSurvivorGradingMsg(data.error || 'Failed to grade'); return }
+      // Update local state
+      setSurvivorPicks((prev) =>
+        survivorGradingFilter === 'pending'
+          ? prev.filter((p) => p.id !== pickId)
+          : prev.map((p) => p.id === pickId ? { ...p, result } : p)
+      )
+      setSurvivorGradingMsg(`Marked as ${result.toUpperCase()}`)
+    } catch { setSurvivorGradingMsg('Error grading pick') }
+    finally { setSurvivorGradingAction(null) }
+  }
+
+  const handleBulkSurvivorGrade = async () => {
+    if (!bulkTeamName.trim()) { setSurvivorGradingMsg('Enter a team name first'); return }
+    setBulkGrading(true)
+    setSurvivorGradingMsg('')
+    try {
+      const res = await fetch('/api/admin/survivor-grade', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ team_name: bulkTeamName.trim(), result: bulkResult }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setSurvivorGradingMsg(data.error || 'Failed'); return }
+      setSurvivorGradingMsg(`Graded ${data.updated} pick(s) for "${bulkTeamName}" as ${bulkResult.toUpperCase()}`)
+      setBulkTeamName('')
+      // Reload picks
+      await loadSurvivorPicks(survivorGradingFilter)
+    } catch { setSurvivorGradingMsg('Error during bulk grade') }
+    finally { setBulkGrading(false) }
+  }
 
   const loadSurvivorTestMode = async () => {
     try {
@@ -504,6 +586,7 @@ export default function AdminPage() {
     { id: 'bracket-model', label: 'Bracket Model', icon: FlaskConical },
     { id: 'bracket-mgmt', label: 'Bracket Mgmt', icon: Star },
     { id: 'survivor-test', label: 'Survivor Test', icon: FlaskConical },
+    { id: 'survivor-grading', label: 'Survivor Grading', icon: Trophy },
     { id: 'users', label: 'Users', icon: Users },
   ]
 
@@ -1711,6 +1794,229 @@ export default function AdminPage() {
                     <p className="text-sm" style={{ color: '#A0A0B0' }}>No users found</p>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Survivor Pick Grading */}
+          {activeTab === 'survivor-grading' && (
+            <div className="space-y-5">
+              {/* Header */}
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div>
+                  <h2 className="text-lg font-bold text-white">Survivor Pick Grading</h2>
+                  <p className="text-sm mt-0.5" style={{ color: '#A0A0B0' }}>
+                    Manually set pick results across all user survivor pools. Use for testing popups, bracket colors, and planner status.
+                  </p>
+                </div>
+                <button
+                  onClick={() => loadSurvivorPicks(survivorGradingFilter)}
+                  disabled={survivorGradingLoading}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all hover:opacity-80"
+                  style={{ background: 'rgba(255,255,255,0.07)', color: '#A0A0B0', border: '1px solid rgba(255,255,255,0.1)' }}
+                >
+                  <RefreshCw className={`w-4 h-4 ${survivorGradingLoading ? 'animate-spin' : ''}`} />
+                  {survivorGradingLoading ? 'Loading...' : 'Load Picks'}
+                </button>
+              </div>
+
+              {/* Auto-grading notice */}
+              <div className="flex items-start gap-3 px-4 py-3 rounded-xl"
+                style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)' }}>
+                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: '#F59E0B' }} />
+                <p className="text-xs" style={{ color: '#A0A0B0' }}>
+                  <strong style={{ color: '#F59E0B' }}>Auto-grading is not enabled</strong> for survivor picks.
+                  The only automatic mechanism is the user-triggered &quot;Sync Results&quot; button on the Survivor page,
+                  which matches pending picks against completed NCAAB game scores. Use this panel to manually set results for testing.
+                </p>
+              </div>
+
+              {/* Bulk Grader */}
+              <div className="glass-card rounded-2xl p-5">
+                <h3 className="text-sm font-bold mb-1" style={{ color: '#E6E6FA' }}>Bulk Grade by Team Name</h3>
+                <p className="text-xs mb-4" style={{ color: '#A0A0B0' }}>
+                  Grade all picks for a given team across every pool — useful for testing round results.
+                </p>
+                <div className="flex gap-3 flex-wrap items-end">
+                  <div className="flex-1 min-w-[180px]">
+                    <label className="text-xs block mb-1.5" style={{ color: '#A0A0B0' }}>Team Name (partial match)</label>
+                    <input
+                      value={bulkTeamName}
+                      onChange={(e) => setBulkTeamName(e.target.value)}
+                      placeholder="e.g. Duke, Kansas, UConn"
+                      className="w-full rounded-lg px-3 py-2 text-sm border text-white"
+                      style={{ background: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)' }}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs block mb-1.5" style={{ color: '#A0A0B0' }}>Result</label>
+                    <select
+                      value={bulkResult}
+                      onChange={(e) => setBulkResult(e.target.value as 'won' | 'eliminated')}
+                      className="rounded-lg px-3 py-2 text-sm border text-white"
+                      style={{ background: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)' }}
+                    >
+                      <option value="won">Won</option>
+                      <option value="eliminated">Eliminated</option>
+                    </select>
+                  </div>
+                  <button
+                    onClick={handleBulkSurvivorGrade}
+                    disabled={bulkGrading || !bulkTeamName.trim()}
+                    className="px-5 py-2 rounded-xl text-sm font-bold transition-all hover:opacity-80 disabled:opacity-40"
+                    style={{
+                      background: bulkResult === 'won' ? 'rgba(0,255,163,0.12)' : 'rgba(255,107,107,0.12)',
+                      color: bulkResult === 'won' ? '#00FFA3' : '#FF6B6B',
+                      border: `1px solid ${bulkResult === 'won' ? 'rgba(0,255,163,0.25)' : 'rgba(255,107,107,0.25)'}`,
+                    }}
+                  >
+                    {bulkGrading ? 'Grading...' : `Mark as ${bulkResult === 'won' ? 'Won' : 'Eliminated'}`}
+                  </button>
+                </div>
+              </div>
+
+              {/* Filter bar */}
+              <div className="flex gap-3 flex-wrap items-center">
+                <div className="flex items-center gap-1.5">
+                  <Filter className="w-3.5 h-3.5" style={{ color: '#6B6B80' }} />
+                  <span className="text-xs" style={{ color: '#6B6B80' }}>Filter:</span>
+                </div>
+                {(['pending', 'won', 'eliminated', 'all'] as const).map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => { setSurvivorGradingFilter(s); loadSurvivorPicks(s) }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition-all"
+                    style={survivorGradingFilter === s
+                      ? { background: 'rgba(0,255,163,0.15)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.3)' }
+                      : { background: 'rgba(255,255,255,0.04)', color: '#A0A0B0', border: '1px solid rgba(255,255,255,0.08)' }
+                    }
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+
+              {/* Result message */}
+              {survivorGradingMsg && (
+                <div className="p-3 rounded-xl text-sm font-medium"
+                  style={{
+                    background: survivorGradingMsg.toLowerCase().includes('error') || survivorGradingMsg.toLowerCase().includes('fail')
+                      ? 'rgba(255,107,107,0.1)' : 'rgba(0,255,163,0.08)',
+                    color: survivorGradingMsg.toLowerCase().includes('error') || survivorGradingMsg.toLowerCase().includes('fail')
+                      ? '#FF6B6B' : '#00FFA3',
+                    border: survivorGradingMsg.toLowerCase().includes('error') || survivorGradingMsg.toLowerCase().includes('fail')
+                      ? '1px solid rgba(255,107,107,0.2)' : '1px solid rgba(0,255,163,0.15)',
+                  }}>
+                  {survivorGradingMsg}
+                </div>
+              )}
+
+              {/* Empty state */}
+              {survivorPicks.length === 0 && !survivorGradingLoading && (
+                <div className="glass-card rounded-2xl p-10 text-center">
+                  <Trophy className="w-10 h-10 mx-auto mb-3" style={{ color: '#6B6B80' }} />
+                  <p className="text-sm font-medium" style={{ color: '#A0A0B0' }}>
+                    No survivor picks found.
+                  </p>
+                  <p className="text-xs mt-1" style={{ color: '#6B6B80' }}>Click &quot;Load Picks&quot; to fetch from the database.</p>
+                </div>
+              )}
+
+              {/* Pick list */}
+              {survivorPicks.length > 0 && (
+                <div className="glass-card rounded-2xl overflow-hidden">
+                  <div className="p-4 border-b flex items-center justify-between" style={{ borderColor: 'rgba(255,255,255,0.07)' }}>
+                    <h3 className="text-sm font-semibold" style={{ color: '#E6E6FA' }}>
+                      {survivorPicks.length} pick{survivorPicks.length !== 1 ? 's' : ''}
+                    </h3>
+                  </div>
+                  <div className="divide-y" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+                    {survivorPicks.map((pick) => {
+                      const resultColor = pick.result === 'won' ? '#00FFA3'
+                        : pick.result === 'eliminated' ? '#FF6B6B'
+                        : '#A0A0B0'
+                      const roundLabels: Record<number, string> = {
+                        1: 'R64', 2: 'R32', 3: 'S16', 4: 'E8', 5: 'F4', 6: 'Champ'
+                      }
+                      const poolName = pick.survivor_pools?.pool_name ?? 'Unknown Pool'
+                      const userEmail = pick.users?.email ?? pick.user_id.slice(0, 8) + '...'
+
+                      return (
+                        <div key={pick.id} className="p-4">
+                          <div className="flex items-start justify-between gap-4 flex-wrap">
+                            {/* Pick info */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                <span className="text-xs font-bold px-2 py-0.5 rounded"
+                                  style={{ background: 'rgba(255,255,255,0.07)', color: '#A0A0B0' }}>
+                                  {roundLabels[pick.round_number] ?? `R${pick.round_number}`}
+                                </span>
+                                <span className="text-xs" style={{ color: '#6B6B80' }}>·</span>
+                                <span className="text-xs" style={{ color: '#6B6B80' }}>{poolName}</span>
+                                <span className="text-xs" style={{ color: '#6B6B80' }}>·</span>
+                                <span className="text-xs" style={{ color: '#6B6B80' }}>{userEmail}</span>
+                              </div>
+                              <div className="text-sm font-bold" style={{ color: '#E6E6FA' }}>
+                                {pick.team_name}
+                                {pick.team_seed != null && (
+                                  <span className="text-xs font-normal ml-1.5" style={{ color: '#A0A0B0' }}>(#{pick.team_seed})</span>
+                                )}
+                                {pick.opponent_name && (
+                                  <span className="text-xs font-normal ml-1.5" style={{ color: '#A0A0B0' }}>vs {pick.opponent_name}</span>
+                                )}
+                              </div>
+                              {pick.win_probability != null && (
+                                <div className="text-xs mt-0.5" style={{ color: '#6B6B80' }}>
+                                  Win prob: {pick.win_probability}%
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Result / Grade buttons */}
+                            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                              {/* Current status badge */}
+                              <span className="text-xs font-bold px-2 py-1 rounded-lg capitalize"
+                                style={{ background: `${resultColor}18`, color: resultColor, border: `1px solid ${resultColor}30` }}>
+                                {pick.result}
+                              </span>
+                              {/* Grade buttons */}
+                              {(['won', 'eliminated', 'pending'] as const).map((r) => {
+                                const colors = { won: '#00FFA3', eliminated: '#FF6B6B', pending: '#A0A0B0' }
+                                const labels = { won: 'Won', eliminated: 'Eliminated', pending: 'Reset' }
+                                if (pick.result === r) return null
+                                const isActive = survivorGradingAction === pick.id + r
+                                return (
+                                  <button
+                                    key={r}
+                                    onClick={() => handleSurvivorGradePick(pick.id, r)}
+                                    disabled={survivorGradingAction !== null}
+                                    className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:opacity-80 disabled:opacity-40"
+                                    style={{
+                                      background: `${colors[r]}12`,
+                                      color: colors[r],
+                                      border: `1px solid ${colors[r]}30`,
+                                    }}
+                                  >
+                                    {isActive ? '...' : labels[r]}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Note about popup triggers */}
+              <div className="glass-card rounded-xl p-4">
+                <p className="text-xs" style={{ color: '#6B6B80' }}>
+                  Grading a pick here immediately updates the <code className="px-1 rounded" style={{ background: 'rgba(255,255,255,0.08)' }}>survivor_picks</code> table.
+                  The next time the user loads the Survivor Pool page, the pick result will reflect in the bracket color coding, Strategy Planner status badges,
+                  and progression popups (ROUND_ADVANCED / ENTRY_ELIMINATED / TOURNAMENT_WIN) — as long as that event has not already been seen by the user.
+                </p>
               </div>
             </div>
           )}

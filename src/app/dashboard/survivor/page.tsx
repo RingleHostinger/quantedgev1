@@ -992,46 +992,87 @@ function SimulationPanel({ picks, onResult }: { picks: SurvivorPick[]; onResult?
             )}
           </div>
 
-          {/* Round-by-round survival */}
-          <div>
-            <div className="text-xs font-bold uppercase tracking-wider mb-3" style={{ color: '#6B6B80' }}>Round-by-Round Survival Rate</div>
-            <div className="space-y-2">
-              {Object.entries(result.roundSurvivalRates).map(([round, rate]) => (
-                <div key={round} className="flex items-center gap-3">
-                  <span className="text-xs w-28 flex-shrink-0" style={{ color: '#A0A0B0' }}>
-                    {ROUND_LABEL[Number(round)] ?? `Round ${round}`}
-                  </span>
-                  <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
-                    <div className="h-full rounded-full transition-all" style={{ width: `${rate}%`, background: survivalColor(rate) }} />
-                  </div>
-                  <span className="text-xs font-black w-12 text-right flex-shrink-0" style={{ color: survivalColor(rate) }}>{rate}%</span>
-                </div>
-              ))}
+          {/* Round-by-round survival — enhanced visual bars */}
+          <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)' }}>
+            <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+              <span className="text-xs font-bold uppercase tracking-wider" style={{ color: '#6B6B80' }}>Round-by-Round Survival</span>
+              <span className="text-[10px]" style={{ color: '#4A4A60' }}>Cumulative probability of surviving each round</span>
+            </div>
+            <div className="px-4 py-3 space-y-3">
+              {Object.entries(result.roundSurvivalRates)
+                .sort(([a], [b]) => Number(a) - Number(b))
+                .map(([round, rate]) => {
+                  const roundNum = Number(round)
+                  const elimPct = result.eliminationBreakdown[roundNum] ?? 0
+                  const color = survivalColor(rate)
+                  // Bar fill is relative to 100% width
+                  return (
+                    <div key={round}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-semibold" style={{ color: '#C0C0D0' }}>
+                          {ROUND_LABEL[roundNum] ?? `Round ${round}`}
+                        </span>
+                        <div className="flex items-center gap-3">
+                          {elimPct > 0 && (
+                            <span className="text-[10px]" style={{ color: '#FF6B6B' }}>
+                              −{elimPct}% eliminated
+                            </span>
+                          )}
+                          <span className="text-sm font-black w-12 text-right" style={{ color }}>{rate}%</span>
+                        </div>
+                      </div>
+                      {/* Track */}
+                      <div className="relative h-5 rounded-lg overflow-hidden" style={{ background: 'rgba(255,255,255,0.05)' }}>
+                        {/* Survival fill */}
+                        <div
+                          className="absolute inset-y-0 left-0 rounded-lg transition-all duration-700"
+                          style={{ width: `${rate}%`, background: `linear-gradient(90deg, ${color}CC, ${color})` }}
+                        />
+                        {/* Elim overlay on right of survival bar */}
+                        {elimPct > 0 && (
+                          <div
+                            className="absolute inset-y-0 rounded-lg"
+                            style={{
+                              left: `${rate}%`,
+                              width: `${elimPct}%`,
+                              background: 'rgba(255,107,107,0.3)',
+                            }}
+                          />
+                        )}
+                        {/* Label inside bar */}
+                        {rate >= 15 && (
+                          <div className="absolute inset-0 flex items-center px-2.5">
+                            <span className="text-[10px] font-black" style={{ color: 'rgba(0,0,0,0.7)' }}>
+                              {ROUND_LABEL[roundNum]?.split(' ')[0]}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+            </div>
+            {/* Legend */}
+            <div className="px-4 py-2 flex items-center gap-4" style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+              <div className="flex items-center gap-1.5">
+                <div className="w-3 h-2 rounded-sm" style={{ background: '#00FFA3' }} />
+                <span className="text-[10px]" style={{ color: '#6B6B80' }}>Survival probability</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-3 h-2 rounded-sm" style={{ background: 'rgba(255,107,107,0.5)' }} />
+                <span className="text-[10px]" style={{ color: '#6B6B80' }}>Eliminated this round</span>
+              </div>
             </div>
           </div>
 
-          {/* Elim breakdown */}
-          {Object.keys(result.eliminationBreakdown).length > 0 && (
-            <div>
-              <div className="text-xs font-bold uppercase tracking-wider mb-3" style={{ color: '#6B6B80' }}>
-                Elimination Risk by Round
-                {result.mostCommonElimRound && (
-                  <span className="ml-2 font-normal normal-case" style={{ color: '#FF6B6B' }}>
-                    · Most likely: {ROUND_LABEL[result.mostCommonElimRound]}
-                  </span>
-                )}
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                {Object.entries(result.eliminationBreakdown).map(([round, pct]) => (
-                  <div key={round} className="rounded-xl p-3 text-center"
-                    style={{ background: 'rgba(255,107,107,0.06)', border: '1px solid rgba(255,107,107,0.12)' }}>
-                    <div className="text-sm font-black" style={{ color: '#FF6B6B' }}>{pct}%</div>
-                    <div className="text-[10px] mt-0.5" style={{ color: '#6B6B80' }}>
-                      {ROUND_LABEL[Number(round)] ?? `R${round}`}
-                    </div>
-                  </div>
-                ))}
-              </div>
+          {/* Most likely elimination callout */}
+          {result.mostCommonElimRound && (
+            <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
+              style={{ background: 'rgba(255,107,107,0.06)', border: '1px solid rgba(255,107,107,0.18)' }}>
+              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: '#FF6B6B' }} />
+              <span className="text-xs" style={{ color: '#A0A0B0' }}>
+                Most common elimination: <strong style={{ color: '#FF6B6B' }}>{ROUND_LABEL[result.mostCommonElimRound]}</strong>
+              </span>
             </div>
           )}
 
@@ -1275,17 +1316,37 @@ function AIStrategyCoach({
             <div>
               <div className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#6B6B80' }}>Weak Points</div>
               <div className="space-y-2">
-                {review.weakPoints.map((wp, i) => (
-                  <div key={i} className="flex items-start gap-3 px-4 py-3 rounded-xl"
-                    style={{ background: 'rgba(255,107,107,0.06)', border: '1px solid rgba(255,107,107,0.15)' }}>
-                    <div className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0" style={{ background: '#FF6B6B' }} />
-                    <div>
-                      <span className="text-sm font-bold" style={{ color: '#E6E6FA' }}>{wp.team}</span>
-                      <span className="text-xs ml-1.5" style={{ color: '#6B6B80' }}>{ROUND_LABEL[wp.round] ?? `Round ${wp.round}`}</span>
-                      <p className="text-xs mt-0.5" style={{ color: '#A0A0B0' }}>{wp.issue}</p>
+                {review.weakPoints.map((wp, i) => {
+                  const edge = MOCK_EDGE_TABLE.find((r) => r.team === wp.team)
+                  return (
+                    <div key={i} className="px-4 py-3 rounded-xl"
+                      style={{ background: 'rgba(255,107,107,0.06)', border: '1px solid rgba(255,107,107,0.15)' }}>
+                      <div className="flex items-start gap-2 mb-2">
+                        <div className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0" style={{ background: '#FF6B6B' }} />
+                        <div>
+                          <span className="text-sm font-bold" style={{ color: '#E6E6FA' }}>{wp.team}</span>
+                          <span className="text-xs ml-1.5" style={{ color: '#6B6B80' }}>{ROUND_LABEL[wp.round] ?? `Round ${wp.round}`}</span>
+                          <p className="text-xs mt-0.5" style={{ color: '#A0A0B0' }}>{wp.issue}</p>
+                        </div>
+                      </div>
+                      {edge && (
+                        <div className="flex flex-wrap gap-2 mt-2 ml-3.5">
+                          {[
+                            { label: 'Risk', value: String(edge.riskScore), color: edge.riskScore <= 10 ? '#00FFA3' : edge.riskScore <= 20 ? '#F59E0B' : '#FF6B6B' },
+                            { label: 'Future Value', value: edge.futureValue >= 80 ? 'High' : edge.futureValue >= 50 ? 'Medium' : 'Low', color: edge.futureValue >= 80 ? '#00FFA3' : edge.futureValue >= 50 ? '#F59E0B' : '#A0A0B0' },
+                            { label: 'Survivor EV', value: `+${edge.survivorEV}%`, color: '#A0A0B0' },
+                          ].map(({ label, value, color }) => (
+                            <div key={label} className="flex items-center gap-1 px-2 py-0.5 rounded-full"
+                              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                              <span className="text-[10px]" style={{ color: '#6B6B80' }}>{label}:</span>
+                              <span className="text-[10px] font-bold" style={{ color }}>{value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
@@ -1295,22 +1356,37 @@ function AIStrategyCoach({
             <div>
               <div className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#6B6B80' }}>Save For Later</div>
               <div className="space-y-2">
-                {review.saveForLater.map((s, i) => (
-                  <div key={i} className="flex items-start gap-3 px-4 py-3 rounded-xl"
-                    style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.18)' }}>
-                    <BookmarkCheck className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: '#F59E0B' }} />
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
+                {review.saveForLater.map((s, i) => {
+                  const edge = MOCK_EDGE_TABLE.find((r) => r.team === s.team)
+                  return (
+                    <div key={i} className="px-4 py-3 rounded-xl"
+                      style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.18)' }}>
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <BookmarkCheck className="w-4 h-4 flex-shrink-0" style={{ color: '#F59E0B' }} />
                         <span className="text-sm font-bold" style={{ color: '#E6E6FA' }}>{s.team}</span>
                         <span className="text-xs px-2 py-0.5 rounded-full font-bold"
                           style={{ background: 'rgba(245,158,11,0.12)', color: '#F59E0B', border: '1px solid rgba(245,158,11,0.25)' }}>
                           Better in {s.betterRound}
                         </span>
                       </div>
-                      <p className="text-xs mt-0.5" style={{ color: '#A0A0B0' }}>{s.reason}</p>
+                      <p className="text-xs mb-2" style={{ color: '#A0A0B0' }}>{s.reason}</p>
+                      {edge && (
+                        <div className="flex flex-wrap gap-2">
+                          {[
+                            { label: 'Future Value', value: edge.futureValue >= 80 ? 'High' : edge.futureValue >= 50 ? 'Medium' : 'Low', color: edge.futureValue >= 80 ? '#00FFA3' : '#F59E0B' },
+                            { label: 'AI Score', value: String(edge.aiScore), color: '#A78BFA' },
+                          ].map(({ label, value, color }) => (
+                            <div key={label} className="flex items-center gap-1 px-2 py-0.5 rounded-full"
+                              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                              <span className="text-[10px]" style={{ color: '#6B6B80' }}>{label}:</span>
+                              <span className="text-[10px] font-bold" style={{ color }}>{value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
@@ -1320,21 +1396,53 @@ function AIStrategyCoach({
             <div>
               <div className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#6B6B80' }}>Suggested Replacements</div>
               <div className="space-y-3">
-                {review.suggestedReplacements.map((r, i) => (
-                  <div key={i} className="rounded-xl p-4"
-                    style={{ background: 'rgba(0,255,163,0.04)', border: '1px solid rgba(0,255,163,0.15)' }}>
-                    <div className="flex items-center gap-2 flex-wrap mb-2">
-                      <span className="text-sm font-bold line-through" style={{ color: '#6B6B80' }}>{r.replace}</span>
-                      <ChevronRight className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#6B6B80' }} />
-                      <span className="text-sm font-black" style={{ color: '#00FFA3' }}>{r.with}</span>
-                      <span className="text-xs px-2 py-0.5 rounded-full font-bold ml-auto"
-                        style={{ background: 'rgba(0,255,163,0.1)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.25)' }}>
-                        {r.projectedImpact}
-                      </span>
+                {review.suggestedReplacements.map((r, i) => {
+                  const edgeOld = MOCK_EDGE_TABLE.find((e) => e.team === r.replace)
+                  const edgeNew = MOCK_EDGE_TABLE.find((e) => e.team === r.with)
+                  return (
+                    <div key={i} className="rounded-xl p-4"
+                      style={{ background: 'rgba(0,255,163,0.04)', border: '1px solid rgba(0,255,163,0.15)' }}>
+                      {/* Replace → With header */}
+                      <div className="flex items-center gap-2 flex-wrap mb-2">
+                        <span className="text-sm font-bold line-through" style={{ color: '#6B6B80' }}>{r.replace}</span>
+                        <ChevronRight className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#6B6B80' }} />
+                        <span className="text-sm font-black" style={{ color: '#00FFA3' }}>{r.with}</span>
+                        <span className="text-xs px-2 py-0.5 rounded-full font-bold ml-auto"
+                          style={{ background: 'rgba(0,255,163,0.1)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.25)' }}>
+                          {r.projectedImpact}
+                        </span>
+                      </div>
+                      <p className="text-xs mb-3" style={{ color: '#A0A0B0' }}>{r.reason}</p>
+                      {/* Side-by-side metrics: old vs new */}
+                      {(edgeOld || edgeNew) && (
+                        <div className="grid grid-cols-2 gap-2">
+                          {[edgeOld, edgeNew].map((edge, idx) => {
+                            if (!edge) return null
+                            const isNew = idx === 1
+                            return (
+                              <div key={edge.team} className="rounded-xl p-3"
+                                style={{ background: isNew ? 'rgba(0,255,163,0.06)' : 'rgba(255,255,255,0.03)', border: isNew ? '1px solid rgba(0,255,163,0.18)' : '1px solid rgba(255,255,255,0.07)' }}>
+                                <div className="text-[10px] font-bold mb-2 flex items-center gap-1" style={{ color: isNew ? '#00FFA3' : '#6B6B80' }}>
+                                  {isNew ? '→ ' : ''}{edge.team}
+                                </div>
+                                {[
+                                  { label: 'Risk', value: String(edge.riskScore) },
+                                  { label: 'Future Val.', value: edge.futureValue >= 80 ? 'High' : edge.futureValue >= 50 ? 'Med' : 'Low' },
+                                  { label: 'EV', value: `+${edge.survivorEV}%` },
+                                ].map(({ label, value }) => (
+                                  <div key={label} className="flex items-center justify-between">
+                                    <span className="text-[10px]" style={{ color: '#6B6B80' }}>{label}</span>
+                                    <span className="text-[10px] font-bold" style={{ color: isNew ? '#00FFA3' : '#A0A0B0' }}>{value}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
                     </div>
-                    <p className="text-xs" style={{ color: '#A0A0B0' }}>{r.reason}</p>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
@@ -1364,10 +1472,196 @@ function AIStrategyCoach({
   )
 }
 
+// ─── PickCompareTool ───────────────────────────────────────────────────────
+function PickCompareTool({ usedTeams }: { usedTeams: string[] }) {
+  const [teamA, setTeamA] = useState<string>('')
+  const [teamB, setTeamB] = useState<string>('')
+
+  const edgeA = MOCK_EDGE_TABLE.find((r) => r.team === teamA) ?? null
+  const edgeB = MOCK_EDGE_TABLE.find((r) => r.team === teamB) ?? null
+  const canCompare = edgeA && edgeB
+
+  const availableTeams = MOCK_EDGE_TABLE.map((r) => r.team)
+
+  type Metric = { label: string; keyA: number | null; keyB: number | null; higherIsBetter: boolean; format?: (v: number) => string }
+
+  const metrics: Metric[] = canCompare
+    ? [
+        { label: 'Win Probability', keyA: edgeA.winPct, keyB: edgeB.winPct, higherIsBetter: true, format: (v) => `${v}%` },
+        { label: 'Public Pick %', keyA: edgeA.publicPickPct, keyB: edgeB.publicPickPct, higherIsBetter: false, format: (v) => `${v}%` },
+        { label: 'Survivor EV', keyA: edgeA.survivorEV, keyB: edgeB.survivorEV, higherIsBetter: true, format: (v) => `+${v}%` },
+        { label: 'Future Value', keyA: edgeA.futureValue, keyB: edgeB.futureValue, higherIsBetter: true, format: (v) => String(v) },
+        { label: 'Risk Score', keyA: edgeA.riskScore, keyB: edgeB.riskScore, higherIsBetter: false, format: (v) => String(v) },
+        { label: 'AI Score', keyA: edgeA.aiScore, keyB: edgeB.aiScore, higherIsBetter: true, format: (v) => String(v) },
+      ]
+    : []
+
+  // Tally wins to determine recommendation
+  let scoreA = 0; let scoreB = 0
+  for (const m of metrics) {
+    if (m.keyA == null || m.keyB == null) continue
+    if (m.higherIsBetter) {
+      if (m.keyA > m.keyB) scoreA++
+      else if (m.keyB > m.keyA) scoreB++
+    } else {
+      if (m.keyA < m.keyB) scoreA++
+      else if (m.keyB < m.keyA) scoreB++
+    }
+  }
+
+  const recommendation = canCompare
+    ? scoreA > scoreB
+      ? { winner: teamA, reason: `${teamA} leads on ${scoreA} of ${metrics.length} metrics, including better Survivor EV and AI Score.` }
+      : scoreB > scoreA
+      ? { winner: teamB, reason: `${teamB} leads on ${scoreB} of ${metrics.length} metrics, including better Survivor EV and AI Score.` }
+      : { winner: null, reason: 'Both teams are very closely matched. Consider saving the higher-seeded team for a later round.' }
+    : null
+
+  const winnerColor = (a: number | null, b: number | null, higherIsBetter: boolean) => {
+    if (a == null || b == null || a === b) return '#A0A0B0'
+    const aWins = higherIsBetter ? a > b : a < b
+    return aWins ? '#00FFA3' : '#FF6B6B'
+  }
+  const loserColor = (a: number | null, b: number | null, higherIsBetter: boolean) => {
+    if (a == null || b == null || a === b) return '#A0A0B0'
+    const aWins = higherIsBetter ? a > b : a < b
+    return aWins ? '#FF6B6B' : '#00FFA3'
+  }
+
+  return (
+    <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(6,182,212,0.2)' }}>
+      <div className="px-5 py-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.07)', background: 'rgba(6,182,212,0.04)' }}>
+        <div className="flex items-center gap-2 mb-0.5">
+          <ArrowUpDown className="w-4 h-4" style={{ color: '#06B6D4' }} />
+          <h3 className="font-black text-base" style={{ color: '#E6E6FA' }}>Compare Picks</h3>
+        </div>
+        <p className="text-xs" style={{ color: '#6B6B80' }}>Select two teams to compare side-by-side across all key metrics</p>
+      </div>
+
+      {/* Team selectors */}
+      <div className="px-5 py-4 grid grid-cols-2 gap-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+        {(['A', 'B'] as const).map((side) => {
+          const val = side === 'A' ? teamA : teamB
+          const other = side === 'A' ? teamB : teamA
+          const onChange = side === 'A' ? setTeamA : setTeamB
+          return (
+            <div key={side}>
+              <label className="text-[10px] font-bold uppercase tracking-wider block mb-1.5" style={{ color: '#6B6B80' }}>
+                Team {side}
+              </label>
+              <select
+                value={val}
+                onChange={(e) => onChange(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl text-sm font-semibold outline-none"
+                style={{
+                  background: 'rgba(255,255,255,0.06)',
+                  border: '1px solid rgba(255,255,255,0.12)',
+                  color: val ? '#E6E6FA' : '#6B6B80',
+                }}
+              >
+                <option value="">Select team…</option>
+                {availableTeams
+                  .filter((t) => t !== other)
+                  .map((t) => (
+                    <option key={t} value={t} style={{ background: '#1A1A2E' }}>
+                      {t}{usedTeams.includes(t) ? ' (used)' : ''}
+                    </option>
+                  ))}
+              </select>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Empty state */}
+      {!canCompare && (
+        <div className="px-5 py-6 text-center">
+          <p className="text-sm" style={{ color: '#6B6B80' }}>
+            {!teamA && !teamB ? 'Select two teams above to compare.' : 'Select a second team to compare.'}
+          </p>
+        </div>
+      )}
+
+      {/* Comparison table */}
+      {canCompare && (
+        <div className="px-5 py-4 space-y-4">
+          {/* Header row */}
+          <div className="grid grid-cols-[1fr_auto_auto] gap-2 items-center">
+            <div />
+            <div className="text-center w-24">
+              <div className="text-sm font-black truncate" style={{ color: '#06B6D4' }}>{teamA}</div>
+              <div className="text-[10px]" style={{ color: '#4A4A60' }}>#{edgeA.seed} {edgeA.region}</div>
+            </div>
+            <div className="text-center w-24">
+              <div className="text-sm font-black truncate" style={{ color: '#A78BFA' }}>{teamB}</div>
+              <div className="text-[10px]" style={{ color: '#4A4A60' }}>#{edgeB.seed} {edgeB.region}</div>
+            </div>
+          </div>
+
+          {/* Metric rows */}
+          <div className="space-y-1.5">
+            {metrics.map((m) => {
+              const fmt = m.format ?? ((v: number) => String(v))
+              const aColor = winnerColor(m.keyA, m.keyB, m.higherIsBetter)
+              const bColor = loserColor(m.keyA, m.keyB, m.higherIsBetter)
+              const tied = m.keyA === m.keyB
+              return (
+                <div key={m.label} className="grid grid-cols-[1fr_auto_auto] gap-2 items-center py-2 px-3 rounded-xl"
+                  style={{ background: 'rgba(255,255,255,0.03)' }}>
+                  <span className="text-xs" style={{ color: '#A0A0B0' }}>{m.label}</span>
+                  <div className="w-24 text-center">
+                    <span className="text-sm font-black" style={{ color: tied ? '#A0A0B0' : aColor }}>
+                      {m.keyA != null ? fmt(m.keyA) : '—'}
+                    </span>
+                  </div>
+                  <div className="w-24 text-center">
+                    <span className="text-sm font-black" style={{ color: tied ? '#A0A0B0' : bColor }}>
+                      {m.keyB != null ? fmt(m.keyB) : '—'}
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Recommendation */}
+          {recommendation && (
+            <div className="rounded-xl px-4 py-3"
+              style={{ background: recommendation.winner ? 'rgba(0,255,163,0.06)' : 'rgba(255,255,255,0.04)', border: `1px solid ${recommendation.winner ? 'rgba(0,255,163,0.2)' : 'rgba(255,255,255,0.08)'}` }}>
+              <div className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: recommendation.winner ? '#00FFA3' : '#6B6B80' }}>
+                Recommendation
+                {recommendation.winner && (
+                  <span className="ml-2 font-black normal-case" style={{ color: '#00FFA3' }}>
+                    → {recommendation.winner}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs leading-relaxed" style={{ color: '#A0A0B0' }}>{recommendation.reason}</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── ShareCard ─────────────────────────────────────────────────────────────
-function ShareCard({ picks, poolName }: { picks: SurvivorPick[]; poolName: string }) {
+function ShareCard({
+  picks, poolName, simResult,
+}: {
+  picks: SurvivorPick[]
+  poolName: string
+  simResult: SimResult | null
+}) {
   const cardRef = useRef<HTMLDivElement>(null)
   const [sharing, setSharing] = useState(false)
+
+  // Group ALL picks by round (no 6-pick limit)
+  const groupedRounds = NCAA_ROUNDS.map(({ number, label }) => ({
+    round: number,
+    label,
+    picks: picks.filter((p) => p.round_number === number),
+  })).filter((g) => g.picks.length > 0)
 
   const handleDownload = async () => {
     if (!cardRef.current) return
@@ -1389,24 +1683,28 @@ function ShareCard({ picks, poolName }: { picks: SurvivorPick[]; poolName: strin
   }
 
   const handleTwitter = () => {
+    const topTeams = groupedRounds.flatMap((g) => g.picks.map((p) => p.team_name)).slice(0, 4)
+    const probStr = simResult ? ` Survival prob: ${simResult.survivalProbability}%.` : ''
     const text = encodeURIComponent(
-      `My NCAA Survivor picks for ${poolName}: ${picks.slice(0, 3).map((p) => p.team_name).join(', ')}... 🏀 #MarchMadness #Survivor`
+      `My NCAA Survivor picks for ${poolName}: ${topTeams.join(', ')}...${probStr} 🏀 #MarchMadness #Survivor`
     )
     window.open(`https://twitter.com/intent/tweet?text=${text}`, '_blank')
   }
 
-  const roundedPicks = picks.slice(0, 6)
-  if (roundedPicks.length === 0) return null
+  if (groupedRounds.length === 0) return null
 
   return (
     <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+      {/* Panel header */}
       <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
         <div>
           <div className="flex items-center gap-2">
             <Share2 className="w-4 h-4" style={{ color: '#A78BFA' }} />
             <h3 className="font-black text-base" style={{ color: '#E6E6FA' }}>Share My Survivor Strategy</h3>
           </div>
-          <p className="text-xs mt-0.5" style={{ color: '#6B6B80' }}>Download a shareable pick card for your picks</p>
+          <p className="text-xs mt-0.5" style={{ color: '#6B6B80' }}>
+            {picks.length} pick{picks.length !== 1 ? 's' : ''} across {groupedRounds.length} round{groupedRounds.length !== 1 ? 's' : ''} · Download saves at 2× resolution
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -1429,58 +1727,116 @@ function ShareCard({ picks, poolName }: { picks: SurvivorPick[]; poolName: strin
         </div>
       </div>
 
-      {/* The shareable card (rendered off-screen at full res, visible as preview) */}
-      <div className="p-4">
+      {/* Shareable card — inline preview, captured by html2canvas */}
+      <div className="p-4 overflow-x-auto">
         <div
           ref={cardRef}
           style={{
-            width: 600, padding: 32,
-            background: 'linear-gradient(135deg, #0F0F1A 0%, #1A1A2E 100%)',
+            width: 600,
+            padding: 28,
+            background: 'linear-gradient(140deg, #0F0F1A 0%, #141428 60%, #1A1A35 100%)',
             borderRadius: 20,
             border: '1px solid rgba(0,255,163,0.2)',
-            fontFamily: 'system-ui, sans-serif',
+            fontFamily: 'system-ui, -apple-system, sans-serif',
+            boxSizing: 'border-box',
           }}
         >
           {/* Card header */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-            <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(245,158,11,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <span style={{ fontSize: 20 }}>🏆</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 22, paddingBottom: 18, borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+            <div style={{ width: 44, height: 44, borderRadius: 12, background: 'rgba(245,158,11,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(245,158,11,0.25)', flexShrink: 0 }}>
+              <span style={{ fontSize: 22 }}>🏆</span>
             </div>
-            <div>
-              <div style={{ color: '#E6E6FA', fontSize: 16, fontWeight: 900 }}>QuantEdge Survivor Strategy</div>
-              <div style={{ color: '#6B6B80', fontSize: 12 }}>{poolName} · 2026 NCAA Tournament</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ color: '#E6E6FA', fontSize: 17, fontWeight: 900, lineHeight: 1.2 }}>QuantEdge Survivor Strategy</div>
+              <div style={{ color: '#6B6B80', fontSize: 12, marginTop: 2 }}>{poolName} · 2026 NCAA Tournament</div>
             </div>
-            <div style={{ marginLeft: 'auto', color: '#00FFA3', fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 20, border: '1px solid rgba(0,255,163,0.3)', background: 'rgba(0,255,163,0.08)' }}>
+            <div style={{ flexShrink: 0, color: '#00FFA3', fontSize: 11, fontWeight: 700, padding: '5px 12px', borderRadius: 20, border: '1px solid rgba(0,255,163,0.3)', background: 'rgba(0,255,163,0.08)' }}>
               AI Powered
             </div>
           </div>
 
-          {/* Picks */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
-            {roundedPicks.map((p) => {
-              const edge = MOCK_EDGE_TABLE.find((r) => r.team === p.team_name)
-              const winPct = edge?.winPct ?? p.win_probability ?? 0
-              return (
-                <div key={p.id} style={{ background: 'rgba(255,255,255,0.05)', borderRadius: 12, padding: '12px 14px', border: '1px solid rgba(255,255,255,0.08)' }}>
-                  <div style={{ color: '#6B6B80', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
-                    {ROUND_LABEL[p.round_number] ?? `Round ${p.round_number}`}
-                  </div>
-                  <div style={{ color: '#E6E6FA', fontSize: 15, fontWeight: 900 }}>{p.team_name}</div>
-                  {p.team_seed != null && (
-                    <div style={{ color: '#6B6B80', fontSize: 11, marginTop: 2 }}>#{p.team_seed} seed · {winPct}% win prob</div>
-                  )}
+          {/* Rounds — one section per round, with picks listed below each header */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 20 }}>
+            {groupedRounds.map(({ round, label, picks: roundPicks }) => (
+              <div key={round}>
+                {/* Round header */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <div style={{ color: '#6B6B80', fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.2 }}>{label}</div>
+                  <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.06)' }} />
+                  <div style={{ color: '#4A4A60', fontSize: 10, fontWeight: 700 }}>{roundPicks.length} pick{roundPicks.length !== 1 ? 's' : ''}</div>
                 </div>
-              )
-            })}
+                {/* Team tiles — two per row */}
+                <div style={{ display: 'grid', gridTemplateColumns: roundPicks.length === 1 ? '1fr' : '1fr 1fr', gap: 8 }}>
+                  {roundPicks.map((p) => {
+                    const edge = MOCK_EDGE_TABLE.find((r) => r.team === p.team_name)
+                    const winPct = edge?.winPct ?? p.win_probability ?? 0
+                    const resultColor = (p.result === 'won' || p.result === 'win')
+                      ? '#00FFA3'
+                      : (p.result === 'eliminated' || p.result === 'loss')
+                      ? '#FF6B6B'
+                      : '#A0A0B0'
+                    return (
+                      <div key={p.id} style={{
+                        background: 'rgba(255,255,255,0.05)',
+                        borderRadius: 12,
+                        padding: '11px 14px',
+                        border: '1px solid rgba(255,255,255,0.08)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                      }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ color: '#E6E6FA', fontSize: 16, fontWeight: 900, lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {p.team_name}
+                          </div>
+                          <div style={{ color: '#6B6B80', fontSize: 11, marginTop: 2 }}>
+                            {p.team_seed != null ? `#${p.team_seed} seed` : ''}
+                            {winPct ? ` · ${winPct}% win` : ''}
+                          </div>
+                        </div>
+                        <div style={{ color: resultColor, fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 12, background: `${resultColor}18`, flexShrink: 0 }}>
+                          {(p.result === 'won' || p.result === 'win') ? 'Won' : (p.result === 'eliminated' || p.result === 'loss') ? 'Lost' : 'Pending'}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
 
+          {/* Survival probability (if sim has been run) */}
+          {simResult && (
+            <div style={{
+              marginBottom: 18,
+              padding: '14px 18px',
+              borderRadius: 14,
+              background: 'rgba(0,255,163,0.06)',
+              border: '1px solid rgba(0,255,163,0.2)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}>
+              <div>
+                <div style={{ color: '#6B6B80', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 2 }}>
+                  Projected Survival Probability
+                </div>
+                <div style={{ color: '#A0A0B0', fontSize: 11 }}>
+                  {simResult.simCount.toLocaleString()} simulations · {simResult.evVsPool >= 0 ? '+' : ''}{simResult.evVsPool}% vs avg pool
+                </div>
+              </div>
+              <div style={{ color: '#00FFA3', fontSize: 32, fontWeight: 900, lineHeight: 1 }}>
+                {simResult.survivalProbability}%
+              </div>
+            </div>
+          )}
+
           {/* Footer */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 16, borderTop: '1px solid rgba(255,255,255,0.07)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.07)' }}>
             <div style={{ color: '#4A4A60', fontSize: 11 }}>getquantedge.app · AI Survivor Pool Strategy</div>
-            <div style={{ color: '#00FFA3', fontSize: 11, fontWeight: 700 }}>{roundedPicks.length} picks saved</div>
+            <div style={{ color: '#00FFA3', fontSize: 11, fontWeight: 700 }}>{picks.length} pick{picks.length !== 1 ? 's' : ''} saved</div>
           </div>
         </div>
-        <p className="text-center text-[11px] mt-3" style={{ color: '#4A4A60' }}>Preview · Download saves at 2× resolution</p>
       </div>
     </div>
   )
@@ -1488,91 +1844,120 @@ function ShareCard({ picks, poolName }: { picks: SurvivorPick[]; poolName: strin
 
 // ─── StrategyPlanner ───────────────────────────────────────────────────────
 function StrategyPlanner({
-  picks, onDelete, syncing, onSync,
+  picks, onDelete, syncing, onSync, onReset,
 }: {
-  picks: SurvivorPick[]; onDelete: (id: string) => void; syncing: boolean; onSync: () => void
+  picks: SurvivorPick[]
+  onDelete: (id: string) => void
+  syncing: boolean
+  onSync: () => void
+  onReset: () => void
 }) {
   const grouped = NCAA_ROUNDS.map(({ number, label }) => ({
     round: number,
     label,
     picks: picks.filter((p) => p.round_number === number),
-  })).filter((g) => g.picks.length > 0 || picks.length === 0)
+  })).filter((g) => g.picks.length > 0)
 
   const resultStyle = (result: string) => {
     if (result === 'won' || result === 'win') return { bg: 'rgba(0,255,163,0.12)', color: '#00FFA3', label: 'Won' }
-    if (result === 'eliminated' || result === 'loss') return { bg: 'rgba(255,107,107,0.12)', color: '#FF6B6B', label: 'Eliminated' }
-    return { bg: 'rgba(255,255,255,0.08)', color: '#A0A0B0', label: 'Pending' }
+    if (result === 'eliminated' || result === 'loss') return { bg: 'rgba(255,107,107,0.12)', color: '#FF6B6B', label: 'Lost' }
+    return { bg: 'rgba(255,255,255,0.07)', color: '#A0A0B0', label: 'Pending' }
   }
 
   if (picks.length === 0) return null
 
   return (
     <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
-      <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
-        <div>
-          <div className="flex items-center gap-2">
-            <BookmarkCheck className="w-4 h-4" style={{ color: '#A78BFA' }} />
-            <h3 className="font-black text-base" style={{ color: '#E6E6FA' }}>Strategy Planner</h3>
-          </div>
-          <p className="text-xs mt-0.5" style={{ color: '#6B6B80' }}>
-            {picks.length} pick{picks.length !== 1 ? 's' : ''} saved across {grouped.filter((g) => g.picks.length > 0).length} round{grouped.filter((g) => g.picks.length > 0).length !== 1 ? 's' : ''}
-          </p>
+      {/* Header */}
+      <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+        <div className="flex items-center gap-2">
+          <BookmarkCheck className="w-4 h-4" style={{ color: '#A78BFA' }} />
+          <h3 className="font-black text-sm" style={{ color: '#E6E6FA' }}>Strategy Planner</h3>
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(255,255,255,0.06)', color: '#6B6B80' }}>
+            {picks.length} pick{picks.length !== 1 ? 's' : ''}
+          </span>
         </div>
-        <button
-          onClick={onSync}
-          disabled={syncing}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all hover:opacity-80"
-          style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: '#A0A0B0' }}
-        >
-          <RotateCcw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
-          {syncing ? 'Syncing...' : 'Sync Results'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onSync}
+            disabled={syncing}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-all hover:opacity-80"
+            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: '#A0A0B0' }}
+          >
+            <RotateCcw className={`w-3 h-3 ${syncing ? 'animate-spin' : ''}`} />
+            {syncing ? 'Syncing...' : 'Sync'}
+          </button>
+          <button
+            onClick={onReset}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-all hover:bg-red-500/10"
+            style={{ border: '1px solid rgba(255,107,107,0.25)', color: '#FF6B6B' }}
+            title="Reset all picks for this pool"
+          >
+            <Trash2 className="w-3 h-3" />
+            Reset
+          </button>
+        </div>
       </div>
 
+      {/* Rounds */}
       <div className="divide-y" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
-        {grouped.filter((g) => g.picks.length > 0).map(({ round, label, picks: roundPicks }) => (
-          <div key={round} className="px-5 py-4">
-            <div className="text-xs font-bold uppercase tracking-wider mb-3 flex items-center gap-2" style={{ color: '#6B6B80' }}>
-              <span className="w-5 h-5 rounded-full text-center text-[10px] font-black flex items-center justify-center"
-                style={{ background: 'rgba(255,255,255,0.08)', color: '#A0A0B0' }}>
-                {round}
-              </span>
-              {label}
-              <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(255,255,255,0.06)', color: '#6B6B80' }}>
-                {roundPicks.length} pick{roundPicks.length !== 1 ? 's' : ''}
+        {grouped.map(({ round, label, picks: roundPicks }) => (
+          <div key={round} className="px-4 py-3">
+            {/* Round label */}
+            <div className="flex items-center gap-1.5 mb-2">
+              <span className="text-[10px] font-black uppercase tracking-wider" style={{ color: '#6B6B80' }}>{label}</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(255,255,255,0.06)', color: '#4A4A60' }}>
+                {roundPicks.length}
               </span>
             </div>
-            <div className="space-y-2">
-              {roundPicks.map((p) => {
+            {/* Pick rows — compact */}
+            <div className="space-y-1">
+              {roundPicks.map((p, idx) => {
                 const rs = resultStyle(p.result)
+                const edge = MOCK_EDGE_TABLE.find((r) => r.team === p.team_name)
+                const aiScore = edge?.aiScore ?? p.survivor_value_score
                 return (
-                  <div key={p.id}
-                    className="flex items-center gap-4 px-4 py-3 rounded-xl"
-                    style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <div
+                    key={p.id}
+                    className="flex items-center gap-2 px-3 py-2 rounded-xl"
+                    style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)' }}
+                  >
+                    {/* Pick number */}
+                    <span className="text-[10px] font-black w-4 text-right flex-shrink-0" style={{ color: '#4A4A60' }}>
+                      {idx + 1}.
+                    </span>
+                    {/* Team info */}
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-bold truncate" style={{ color: '#E6E6FA' }}>{p.team_name}</div>
-                      <div className="text-xs truncate" style={{ color: '#6B6B80' }}>
-                        {p.team_seed != null && `#${p.team_seed} seed`}
-                        {p.opponent_name && ` · vs. ${p.opponent_name}`}
-                        {p.win_probability != null && ` · ${p.win_probability}% win prob`}
+                      <div className="text-sm font-bold leading-tight truncate" style={{ color: '#E6E6FA' }}>
+                        {p.team_name}
+                      </div>
+                      <div className="text-[10px] leading-tight truncate" style={{ color: '#4A4A60' }}>
+                        {[
+                          p.team_seed != null && `#${p.team_seed}`,
+                          p.opponent_name && `vs ${p.opponent_name}`,
+                          p.win_probability != null && `${p.win_probability}% win`,
+                        ].filter(Boolean).join(' · ')}
                       </div>
                     </div>
-                    <span className="text-xs font-bold px-2.5 py-1 rounded-full flex-shrink-0"
+                    {/* Status badge */}
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0"
                       style={{ background: rs.bg, color: rs.color }}>
                       {rs.label}
                     </span>
-                    {p.survivor_value_score != null && (
-                      <span className="text-xs font-bold flex-shrink-0" style={{ color: '#00FFA3' }}>
-                        {p.survivor_value_score}
+                    {/* AI score */}
+                    {aiScore != null && (
+                      <span className="text-[10px] font-black flex-shrink-0 w-6 text-right" style={{ color: '#00FFA3' }}>
+                        {aiScore}
                       </span>
                     )}
+                    {/* Delete */}
                     <button
                       onClick={() => onDelete(p.id)}
-                      className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-all hover:bg-red-500/15"
-                      style={{ color: '#4A4A60', border: '1px solid rgba(255,255,255,0.07)' }}
+                      className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 transition-all hover:bg-red-500/15"
+                      style={{ color: '#4A4A60' }}
                       title="Remove pick"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-3 h-3" />
                     </button>
                   </div>
                 )
@@ -2372,6 +2757,22 @@ export default function SurvivorPage() {
     showToast('Pick removed')
   }
 
+  const handleResetStrategy = async () => {
+    if (!activePool) return
+    if (!window.confirm('Are you sure you want to reset this survivor strategy? All saved picks for this pool will be deleted. The pool itself and its rules will not be affected.')) return
+    // Delete all picks for the active pool one by one
+    const currentPicks = picks.slice()
+    setPicks([]) // optimistic clear
+    for (const p of currentPicks) {
+      await fetch('/api/survivor', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete_pick', pick_id: p.id }),
+      })
+    }
+    showToast('Strategy reset — all picks cleared')
+  }
+
   const handleSyncResults = async () => {
     if (!activePool) return
     setSyncing(true)
@@ -2603,6 +3004,9 @@ export default function SurvivorPage() {
                   {/* Reservation Tool */}
                   <ReservationTool usedTeams={usedTeams} />
 
+                  {/* Pick Comparison Tool */}
+                  <PickCompareTool usedTeams={usedTeams} />
+
                   {/* Simulation Panel */}
                   <SimulationPanel picks={picks} onResult={setLastSimResult} />
 
@@ -2615,13 +3019,13 @@ export default function SurvivorPage() {
 
                   {/* Share Card */}
                   {picks.length > 0 && (
-                    <ShareCard picks={picks} poolName={activePool.pool_name} />
+                    <ShareCard picks={picks} poolName={activePool.pool_name} simResult={lastSimResult} />
                   )}
                 </div>
 
                 {/* Right column — Strategy Planner (sticky on large screens) */}
                 <div className="xl:sticky xl:top-4 space-y-4">
-                  <StrategyPlanner picks={picks} onDelete={handleDeletePick} syncing={syncing} onSync={handleSyncResults} />
+                  <StrategyPlanner picks={picks} onDelete={handleDeletePick} syncing={syncing} onSync={handleSyncResults} onReset={handleResetStrategy} />
 
                   {/* Edit pool button */}
                   <div className="flex justify-center">
