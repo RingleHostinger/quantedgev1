@@ -92,7 +92,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
           {/* Full logo */}
           <div className="mb-4">
-            <QuantEdgeLogo variant="full" height={36} linked={false} />
+            <QuantEdgeLogo variant="full" width={150} linked={false} />
           </div>
           <p className="text-sm font-medium" style={{ color: '#A0A0B0' }}>
             QuantEdge AI is analyzing the data...
@@ -156,8 +156,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const SidebarContent = () => (
     <>
       {/* Logo */}
-      <div className="px-4 py-4 border-b" style={{ borderColor: 'rgba(255,255,255,0.07)' }}>
-        <QuantEdgeLogo variant="auto" height={38} href="/dashboard" />
+      <div className="px-4 py-5 border-b" style={{ borderColor: 'rgba(255,255,255,0.07)' }}>
+        <QuantEdgeLogo variant="auto" width={150} href="/dashboard" />
       </div>
 
       {/* Nav */}
@@ -264,7 +264,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             >
               <Menu className="w-5 h-5" />
             </button>
-            <QuantEdgeLogo variant="full" height={30} href="/dashboard" />
+            <QuantEdgeLogo variant="full" width={130} href="/dashboard" />
           </div>
 
           {/* Desktop: current page label */}

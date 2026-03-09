@@ -2,11 +2,17 @@ import Image from 'next/image'
 import Link from 'next/link'
 
 interface QuantEdgeLogoProps {
-  /** 'full' = logo image + text fallback | 'icon' = icon portion only | 'auto' = full on desktop, icon on mobile */
+  /** 'full' = full logo | 'icon' = icon portion only | 'auto' = full on sm+, icon on xs */
   variant?: 'full' | 'icon' | 'auto'
-  /** Height in px — width scales proportionally */
+  /**
+   * Desired rendered width in px. Height is always auto to preserve aspect ratio.
+   * Full logo native size: 1316×600 (aspect ~2.193:1)
+   * Icon crop (left ~40%): ~520×400 (aspect ~1.3:1)
+   */
+  width?: number
+  /** Legacy height prop — ignored when width is set, kept for backwards compat */
   height?: number
-  /** Wrap in a Link to /dashboard */
+  /** Wrap in a Link */
   linked?: boolean
   /** href override (default: /dashboard) */
   href?: string
@@ -15,58 +21,73 @@ interface QuantEdgeLogoProps {
 
 /**
  * QuantEdge brand logo component.
- * Uses the actual logo PNG from /public/quantedge-logo.png.
- * Aspect ratio of the full logo image is ~2.19:1 (1316×600).
+ * Specify `width` in px; height is always auto so the aspect ratio is never distorted.
+ * Native image: /public/quantedge-logo.png — 1316×600px (~2.193:1 aspect ratio).
  */
 export function QuantEdgeLogo({
   variant = 'full',
-  height = 40,
+  width,
+  height,
   linked = true,
   href = '/dashboard',
   className = '',
 }: QuantEdgeLogoProps) {
-  // Full logo: 1316×600 → aspect 2.193
-  const fullWidth = Math.round(height * 2.193)
-  // Icon portion only (left ~40% of image): 1316×600 crop ~520×400 → aspect 1.3
-  const iconWidth = Math.round(height * 1.3)
+  // Resolve the rendered width to use.
+  // If `width` is given, use it directly.
+  // Otherwise fall back to deriving from legacy `height` prop (height * aspect ratio).
+  const ASPECT_FULL = 2.193   // 1316 / 600
+  const ASPECT_ICON = 1.3     // icon crop ~520 / 400
+
+  const resolvedFullWidth = width ?? (height ? Math.round(height * ASPECT_FULL) : 200)
+  const resolvedIconWidth = width ?? (height ? Math.round(height * ASPECT_ICON) : 60)
+
+  // Derive native heights for next/image's required width+height props (only used as hints).
+  const fullNativeHeight = Math.round(resolvedFullWidth / ASPECT_FULL)
+  const iconNativeHeight = Math.round(resolvedIconWidth / ASPECT_ICON)
+
+  const logoFilter = 'drop-shadow(0 0 6px rgba(0,255,180,0.35)) contrast(1.05) brightness(1.05)'
 
   const fullLogo = (
     <Image
       src="/quantedge-logo.png"
       alt="QuantEdge"
-      width={fullWidth}
-      height={height}
+      width={resolvedFullWidth}
+      height={fullNativeHeight}
       priority
-      className="object-contain"
-      style={{ height, width: 'auto', maxWidth: fullWidth }}
+      style={{
+        width: resolvedFullWidth,
+        height: 'auto',
+        display: 'block',
+        objectFit: 'contain',
+        flexShrink: 0,
+        filter: logoFilter,
+      }}
     />
   )
 
   const iconLogo = (
-    // Show only the left icon portion by clipping with overflow hidden
     <div
       style={{
-        width: iconWidth,
-        height: height,
+        width: resolvedIconWidth,
         overflow: 'hidden',
         flexShrink: 0,
         position: 'relative',
+        lineHeight: 0,
       }}
     >
       <Image
         src="/quantedge-logo.png"
         alt="QuantEdge"
-        width={fullWidth}
-        height={height}
+        width={resolvedFullWidth}
+        height={fullNativeHeight}
         priority
-        className="object-contain object-left"
         style={{
-          height,
-          width: 'auto',
-          maxWidth: 'none',
-          position: 'absolute',
-          top: 0,
-          left: 0,
+          width: resolvedFullWidth,
+          height: 'auto',
+          objectFit: 'contain',
+          objectPosition: 'left',
+          position: 'relative',
+          filter: logoFilter,
         }}
       />
     </div>
@@ -74,19 +95,30 @@ export function QuantEdgeLogo({
 
   const autoLogo = (
     <>
-      {/* Full logo on md+ screens */}
+      {/* Full logo on sm+ screens */}
       <span className="hidden sm:inline-flex items-center">
         {fullLogo}
       </span>
-      {/* Icon only on small screens */}
+      {/* Icon only on xs screens */}
       <span className="sm:hidden inline-flex items-center">
         {iconLogo}
       </span>
     </>
   )
 
+  const hoverStyle: React.CSSProperties = {
+    transition: 'transform 0.2s ease',
+    display: 'inline-flex',
+    alignItems: 'center',
+  }
+
   const content = (
-    <span className={`inline-flex items-center ${className}`}>
+    <span
+      className={`inline-flex items-center ${className}`}
+      style={!linked ? hoverStyle : undefined}
+      onMouseEnter={!linked ? (e) => { (e.currentTarget as HTMLElement).style.transform = 'scale(1.03)' } : undefined}
+      onMouseLeave={!linked ? (e) => { (e.currentTarget as HTMLElement).style.transform = 'scale(1)' } : undefined}
+    >
       {variant === 'full' && fullLogo}
       {variant === 'icon' && iconLogo}
       {variant === 'auto' && autoLogo}
@@ -96,7 +128,13 @@ export function QuantEdgeLogo({
   if (!linked) return content
 
   return (
-    <Link href={href} className="inline-flex items-center focus:outline-none">
+    <Link
+      href={href}
+      className="inline-flex items-center focus:outline-none"
+      style={hoverStyle}
+      onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.03)' }}
+      onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)' }}
+    >
       {content}
     </Link>
   )

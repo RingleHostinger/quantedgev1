@@ -45,7 +45,7 @@ export default function ForgotPasswordPage() {
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="flex justify-center mb-8">
-          <QuantEdgeLogo variant="full" height={44} href="/login" />
+          <QuantEdgeLogo variant="full" width={240} href="/login" />
         </div>
 
         <div className="glass-card rounded-2xl p-8">

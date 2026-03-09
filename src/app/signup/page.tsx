@@ -50,7 +50,7 @@ export default function SignupPage() {
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="flex justify-center mb-8">
-          <QuantEdgeLogo variant="full" height={44} href="/dashboard" />
+          <QuantEdgeLogo variant="full" width={240} href="/dashboard" />
         </div>
 
         <div className="glass-card rounded-2xl p-8">

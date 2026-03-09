@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { Brain, TrendingUp, Shield, Zap, Star, ChevronRight, Target, BarChart3, Users, Trophy } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { QuantEdgeLogo } from '@/components/QuantEdgeLogo'
 
 const recentPredictions = [
   { home: 'Liverpool', away: 'Arsenal', predicted: '2-1', actual: '2-1', correct: true, confidence: 74 },
@@ -18,11 +19,8 @@ export default function LandingPage() {
       {/* Nav */}
       <nav className="border-b border-white/8 px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg gradient-green flex items-center justify-center">
-              <Brain className="w-5 h-5 text-white" />
-            </div>
-            <span className="text-xl font-bold" style={{ color: '#E6E6FA' }}>SportsPick<span style={{ color: '#00FFA3' }}>.AI</span></span>
+          <div className="flex items-center">
+            <QuantEdgeLogo variant="full" width={200} href="/dashboard" />
           </div>
           <div className="hidden md:flex items-center gap-8">
             <a href="#features" className="text-sm transition-colors hover:text-white" style={{ color: '#A0A0B0' }}>Features</a>
@@ -224,11 +222,8 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="border-t px-6 py-10" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg gradient-green flex items-center justify-center">
-              <Brain className="w-4 h-4 text-white" />
-            </div>
-            <span className="font-bold" style={{ color: '#E6E6FA' }}>SportsPick<span style={{ color: '#00FFA3' }}>.AI</span></span>
+          <div className="flex items-center">
+            <QuantEdgeLogo variant="full" width={200} href="/dashboard" />
           </div>
           <div className="flex gap-6 text-sm" style={{ color: '#A0A0B0' }}>
             <Link href="/login" className="hover:text-white transition-colors">Login</Link>
