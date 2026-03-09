@@ -348,10 +348,24 @@ export async function syncOddsToGamesAndPredictions(): Promise<SyncResult> {
     }
   }
 
+  // Log per-league prediction counts
+  const leagueCounts: Record<string, number> = {}
+  for (const game of freshGames) {
+    const l = game.league || 'unknown'
+    leagueCounts[l] = (leagueCounts[l] ?? 0) + 1
+  }
+  console.info('[oddsSyncService] Games synced per league:', JSON.stringify(leagueCounts))
+  console.info('[oddsSyncService] Predictions generated:', predictionsGenerated, 'updated:', predictionsUpdated, 'errors:', errors.length)
+
   // Step 7: Select top 5 official AI picks for the day
   try {
-    await selectAndInsertOfficialPicks()
-  } catch {
+    const picksResult = await selectAndInsertOfficialPicks()
+    console.info('[oddsSyncService] Official picks — inserted:', picksResult.inserted, 'skipped:', picksResult.skipped, 'errors:', picksResult.errors.length)
+    if (picksResult.errors.length > 0) {
+      console.warn('[oddsSyncService] Official picks errors:', picksResult.errors.join(' | '))
+    }
+  } catch (err) {
+    console.warn('[oddsSyncService] Official picks selection failed:', err)
     // Non-critical — picks selected on next refresh if this fails
   }
 

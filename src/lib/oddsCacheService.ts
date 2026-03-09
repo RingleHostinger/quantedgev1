@@ -1,14 +1,24 @@
 /**
  * oddsCacheService
  *
- * Fetches odds from The Odds API and stores them in the cached_odds table.
+ * Fetches odds and stores them in the cached_odds table.
  * Cache TTL: 60 minutes. On every read the staleness is checked; if stale,
  * a fresh fetch is triggered automatically before returning data.
  *
- * Frontend should NEVER call The Odds API directly — only use /api/odds.
+ * Data source priority:
+ *   1. SportsDataIO (when SPORTSDATAIO_*_KEY vars are set) — NBA, NHL, NCAAB
+ *   2. The Odds API (when ODDS_API_KEY is set) — fallback / all sports
+ *
+ * Frontend should NEVER call either API directly — only use /api/odds.
  */
 
 import { supabaseAdmin } from '@/integrations/supabase/server'
+import {
+  refreshOddsCacheFromSdio,
+  isSdioConfigured,
+  getSdioConfiguredLeagues,
+  fetchSdioScores,
+} from './sportsDataIOService'
 
 // ─── Runtime env fallback ─────────────────────────────────────────────────────
 // In production (next start), server-only env vars like ODDS_API_KEY may not
@@ -352,8 +362,13 @@ export interface RefreshResult {
 }
 
 /**
- * Fetch fresh odds from The Odds API for all configured sports and
- * store them in the cached_odds table.
+ * Fetch fresh odds for all configured sports and store them in cached_odds.
+ *
+ * Source priority:
+ *   1. SportsDataIO — used when any SPORTSDATAIO_*_KEY is set.
+ *      Covers NBA, NHL, NCAAB. Sets the `dataProvider` field on the result.
+ *   2. The Odds API — fallback for any league NOT covered by SportsDataIO,
+ *      OR when no SportsDataIO keys are configured at all.
  *
  * This is the core refresh function — called by:
  *  1. /api/odds  (when cache is stale, auto-refresh before returning data)
@@ -362,61 +377,97 @@ export interface RefreshResult {
 export async function refreshOddsCache(): Promise<RefreshResult> {
   const errors: string[] = []
   const sportsRefreshed: string[] = []
-  const sportsSkipped: string[] = []   // off-season / 0 games
-  let totalFetched = 0
+  const sportsSkipped: string[] = []
+  let totalFetched  = 0
   let totalUpserted = 0
 
-  // Fail fast if the API key is missing — no point hitting all 7 endpoints
-  const apiKey = process.env.ODDS_API_KEY || ''
-  if (!apiKey) {
-    const msg = 'ODDS_API_KEY environment variable is not set — cannot refresh odds cache'
-    console.error('[oddsCacheService]', msg)
-    return {
-      success: false,
-      totalFetched: 0,
-      totalUpserted: 0,
-      sportsRefreshed: [],
-      errors: [msg],
-      refreshedAt: new Date().toISOString(),
+  // ── Step 1: SportsDataIO (primary) ──────────────────────────────────────────
+  const sdioEnabled = isSdioConfigured()
+
+  if (sdioEnabled) {
+    console.info('[oddsCacheService] SportsDataIO keys detected — using as primary data source')
+    try {
+      const sdioResult = await refreshOddsCacheFromSdio()
+      totalFetched  += sdioResult.totalFetched
+      totalUpserted += sdioResult.totalUpserted
+      sportsRefreshed.push(...sdioResult.leaguesRefreshed)
+      if (sdioResult.errors.length) {
+        errors.push(...sdioResult.errors.map((e) => `[SportsDataIO] ${e}`))
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      errors.push(`[SportsDataIO] unexpected error: ${msg}`)
+      console.error('[oddsCacheService] SportsDataIO refresh threw:', msg)
     }
   }
 
-  console.info(`[oddsCacheService] Starting refresh for ${SPORT_KEYS.length} sports:`, SPORT_KEYS.join(', '))
+  // ── Step 2: TheOddsAPI fallback ──────────────────────────────────────────────
+  // Use TheOddsAPI for any sport key whose league is NOT already covered by SDIO,
+  // or for ALL sports when SDIO is not configured.
+  const sdioLeagues = sdioEnabled ? getSdioConfiguredLeagues() : []
 
-  const results = await Promise.allSettled(
-    SPORT_KEYS.map(async (sportKey) => {
-      try {
-        const games = await fetchOddsForSport(sportKey)
-        totalFetched += games.length
+  // Which TheOddsAPI sport keys are still needed?
+  const fallbackSportKeys = sdioEnabled
+    ? SPORT_KEYS.filter((key) => {
+        const league = SPORT_MAP[key]?.league
+        return !league || !sdioLeagues.includes(league)
+      })
+    : SPORT_KEYS
 
-        if (games.length > 0) {
-          const upserted = await upsertOdds(games, sportKey)
-          totalUpserted += upserted
-          sportsRefreshed.push(sportKey)
-          console.info(`[oddsCacheService] ${sportKey}: fetched=${games.length} upserted=${upserted}`)
-        } else {
-          // No games returned — purge any stale rows for this sport so yesterday's
-          // games don't persist in the cache and contaminate today's predictions.
-          const meta = SPORT_MAP[sportKey]
-          if (meta) {
-            await supabaseAdmin.from('cached_odds').delete().eq('league', meta.league)
-            console.info(`[oddsCacheService] ${sportKey}: 0 games — purged stale cache rows`)
-          }
-          sportsSkipped.push(sportKey)
+  if (fallbackSportKeys.length > 0) {
+    const apiKey = process.env.ODDS_API_KEY || ''
+    if (!apiKey) {
+      if (!sdioEnabled) {
+        // Neither source is configured — hard fail
+        const msg = 'No data source configured: set ODDS_API_KEY or SPORTSDATAIO_*_KEY'
+        console.error('[oddsCacheService]', msg)
+        return {
+          success: false,
+          totalFetched: 0,
+          totalUpserted: 0,
+          sportsRefreshed: [],
+          errors: [msg],
+          refreshedAt: new Date().toISOString(),
         }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        errors.push(`${sportKey}: ${msg}`)
-        console.error(`[oddsCacheService] ${sportKey} FAILED:`, msg)
       }
-    })
-  )
+      // SportsDataIO is active but TheOddsAPI key is missing — skip fallback sports
+      console.info(`[oddsCacheService] ODDS_API_KEY not set — skipping TheOddsAPI fallback for: ${fallbackSportKeys.join(', ')}`)
+    } else {
+      console.info(`[oddsCacheService] TheOddsAPI fallback for: ${fallbackSportKeys.join(', ')}`)
 
-  // Surface any unexpected Promise rejections that slipped past the inner try/catch
-  for (const r of results) {
-    if (r.status === 'rejected') {
-      const msg = r.reason instanceof Error ? r.reason.message : String(r.reason)
-      if (!errors.some(e => e.includes(msg))) errors.push(msg)
+      const results = await Promise.allSettled(
+        fallbackSportKeys.map(async (sportKey) => {
+          try {
+            const games = await fetchOddsForSport(sportKey)
+            totalFetched += games.length
+
+            if (games.length > 0) {
+              const upserted = await upsertOdds(games, sportKey)
+              totalUpserted += upserted
+              sportsRefreshed.push(sportKey)
+              console.info(`[oddsCacheService] ${sportKey}: fetched=${games.length} upserted=${upserted}`)
+            } else {
+              const meta = SPORT_MAP[sportKey]
+              if (meta) {
+                await supabaseAdmin.from('cached_odds').delete().eq('league', meta.league)
+                console.info(`[oddsCacheService] ${sportKey}: 0 games — purged stale cache rows`)
+              }
+              sportsSkipped.push(sportKey)
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err)
+            errors.push(`${sportKey}: ${msg}`)
+            console.error(`[oddsCacheService] ${sportKey} FAILED:`, msg)
+          }
+        })
+      )
+
+      for (const r of results) {
+        if (r.status === 'rejected') {
+          const msg = r.reason instanceof Error ? r.reason.message : String(r.reason)
+          if (!errors.some((e) => e.includes(msg))) errors.push(msg)
+        }
+      }
     }
   }
 
@@ -457,12 +508,12 @@ interface OddsApiScoreGame {
 }
 
 /**
- * Fetch scores for recently completed games from The Odds API and update the
- * games table with final scores + status = 'final'.
+ * Fetch scores for recently completed games and update the games table with
+ * final scores + status = 'final'.
  *
- * The Odds API /scores endpoint returns games completed within the last
- * `daysFrom` days (default 1, max 3 on free tier). We request 2 days to
- * catch any games from the previous slate that finished late.
+ * Source priority:
+ *   1. SportsDataIO (when SPORTSDATAIO_*_KEY vars are set)
+ *   2. The Odds API fallback (when ODDS_API_KEY is set)
  *
  * Only games already in the games table (matched by odds_game_id) are updated.
  */
@@ -473,76 +524,94 @@ export async function fetchAndUpdateGameScores(): Promise<{
   const errors: string[] = []
   let updated = 0
 
-  const apiKey = process.env.ODDS_API_KEY || ''
-  if (!apiKey) {
-    return { updated: 0, errors: ['ODDS_API_KEY not set — cannot fetch scores'] }
-  }
+  // Map of odds_game_id → { home, away } scores (merged from both sources)
+  const scoresByGameId = new Map<string, { home: number; away: number }>()
 
-  // Fetch scores for each configured sport in parallel
-  const allScores: OddsApiScoreGame[] = []
-
-  await Promise.allSettled(
-    SPORT_KEYS.map(async (sportKey) => {
-      try {
-        const url =
-          `${ODDS_API_BASE}/sports/${sportKey}/scores` +
-          `?apiKey=${apiKey}` +
-          `&daysFrom=2` +
-          `&dateFormat=iso`
-
-        const controller = new AbortController()
-        const timeout = setTimeout(() => controller.abort(), 15_000)
-        let res: Response
-        try {
-          res = await fetch(url, { signal: controller.signal, cache: 'no-store' })
-        } finally {
-          clearTimeout(timeout)
-        }
-
-        if (res.status === 422) return // off-season
-        if (!res.ok) {
-          const text = await res.text().catch(() => '')
-          errors.push(`scores ${sportKey}: HTTP ${res.status} — ${text.slice(0, 100)}`)
-          return
-        }
-
-        const json = await res.json()
-        const games: OddsApiScoreGame[] = Array.isArray(json) ? json : []
-        const completed = games.filter((g) => g.completed && g.scores)
-        console.info(`[oddsCacheService] scores ${sportKey}: ${completed.length} completed games`)
-        allScores.push(...completed)
-      } catch (err) {
-        errors.push(`scores ${sportKey}: ${err instanceof Error ? err.message : String(err)}`)
+  // ── Step 1: SportsDataIO scores (primary) ────────────────────────────────────
+  if (isSdioConfigured()) {
+    try {
+      const { scores: sdioScores, errors: sdioErrors } = await fetchSdioScores()
+      for (const s of sdioScores) {
+        scoresByGameId.set(s.game_id, { home: s.homeScore, away: s.awayScore })
       }
-    })
-  )
-
-  if (allScores.length === 0) {
-    return { updated: 0, errors }
+      if (sdioErrors.length) {
+        errors.push(...sdioErrors.map((e) => `[SportsDataIO scores] ${e}`))
+      }
+      console.info(`[oddsCacheService] SportsDataIO scores: ${sdioScores.length} completed games`)
+    } catch (err) {
+      errors.push(`[SportsDataIO scores] ${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 
-  // Map odds_game_id → scores
-  const scoresByGameId = new Map<string, { home: number; away: number; homeTeam: string; awayTeam: string }>()
-  for (const game of allScores) {
-    if (!game.scores) continue
-    const homeEntry = game.scores.find((s) => s.name === game.home_team)
-    const awayEntry = game.scores.find((s) => s.name === game.away_team)
-    const homeScore = homeEntry?.score != null ? parseInt(homeEntry.score, 10) : null
-    const awayScore = awayEntry?.score != null ? parseInt(awayEntry.score, 10) : null
-    if (homeScore == null || awayScore == null) continue
-    scoresByGameId.set(game.id, {
-      home: homeScore,
-      away: awayScore,
-      homeTeam: game.home_team,
-      awayTeam: game.away_team,
-    })
+  // ── Step 2: TheOddsAPI scores fallback ───────────────────────────────────────
+  const apiKey = process.env.ODDS_API_KEY || ''
+  if (apiKey) {
+    // Only fetch sports whose leagues SDIO doesn't cover (to avoid double-updating)
+    const sdioLeagues = isSdioConfigured() ? getSdioConfiguredLeagues() : []
+    const fallbackKeys = sdioLeagues.length > 0
+      ? SPORT_KEYS.filter((k) => {
+          const l = SPORT_MAP[k]?.league
+          return !l || !sdioLeagues.includes(l)
+        })
+      : SPORT_KEYS
+
+    const allScores: OddsApiScoreGame[] = []
+
+    await Promise.allSettled(
+      fallbackKeys.map(async (sportKey) => {
+        try {
+          const url =
+            `${ODDS_API_BASE}/sports/${sportKey}/scores` +
+            `?apiKey=${apiKey}` +
+            `&daysFrom=2` +
+            `&dateFormat=iso`
+
+          const controller = new AbortController()
+          const timeout = setTimeout(() => controller.abort(), 15_000)
+          let res: Response
+          try {
+            res = await fetch(url, { signal: controller.signal, cache: 'no-store' })
+          } finally {
+            clearTimeout(timeout)
+          }
+
+          if (res.status === 422) return // off-season
+          if (!res.ok) {
+            const text = await res.text().catch(() => '')
+            errors.push(`scores ${sportKey}: HTTP ${res.status} — ${text.slice(0, 100)}`)
+            return
+          }
+
+          const json = await res.json()
+          const games: OddsApiScoreGame[] = Array.isArray(json) ? json : []
+          const completed = games.filter((g) => g.completed && g.scores)
+          console.info(`[oddsCacheService] scores ${sportKey}: ${completed.length} completed games`)
+          allScores.push(...completed)
+        } catch (err) {
+          errors.push(`scores ${sportKey}: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      })
+    )
+
+    for (const game of allScores) {
+      if (!game.scores) continue
+      const homeEntry = game.scores.find((s) => s.name === game.home_team)
+      const awayEntry = game.scores.find((s) => s.name === game.away_team)
+      const homeScore = homeEntry?.score != null ? parseInt(homeEntry.score, 10) : null
+      const awayScore = awayEntry?.score != null ? parseInt(awayEntry.score, 10) : null
+      if (homeScore == null || awayScore == null) continue
+      // Don't overwrite SDIO scores if already present
+      if (!scoresByGameId.has(game.id)) {
+        scoresByGameId.set(game.id, { home: homeScore, away: awayScore })
+      }
+    }
   }
 
   if (scoresByGameId.size === 0) {
     return { updated: 0, errors }
   }
 
-  // Fetch games from DB that match these odds_game_ids
+  // ── Step 3: Update games table ───────────────────────────────────────────────
   const { data: dbGames, error: fetchErr } = await supabaseAdmin
     .from('games')
     .select('id, odds_game_id, status')
@@ -553,7 +622,6 @@ export async function fetchAndUpdateGameScores(): Promise<{
     return { updated, errors }
   }
 
-  // Update each game that has a final score and is not already marked final
   for (const game of dbGames) {
     if (game.status === 'final') continue // already settled
     const scores = scoresByGameId.get(game.odds_game_id)

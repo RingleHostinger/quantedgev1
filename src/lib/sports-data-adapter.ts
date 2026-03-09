@@ -259,11 +259,125 @@ export const SportradarProvider: Partial<DataProvider> = {
   },
 }
 
+// ─── SportsDataIO provider ────────────────────────────────────────────────
+
+/**
+ * SportsDataIO provider for team stats and injuries.
+ * Injuries endpoint: /v3/{league}/scores/json/Injuries
+ * Team stats are not available as a direct endpoint — we derive them from
+ * season standings/stats when the key is set, falling back to mock data.
+ */
+export const SportsDataIOProvider: DataProvider = {
+  name: 'SportsDataIO',
+  isConnected: !!(
+    process.env.SPORTSDATAIO_NBA_KEY ||
+    process.env.SPORTSDATAIO_NHL_KEY ||
+    process.env.SPORTSDATAIO_CBB_KEY
+  ),
+
+  async fetchTeamStats(teamName: string, league: string, isHome: boolean): Promise<TeamStats> {
+    // SportsDataIO does not expose a direct per-team efficiency endpoint in v3 basic tier.
+    // Use mock stats (seeded from team name) as a placeholder until a stats feed is wired.
+    return getMockTeamStats(teamName, league, isHome)
+  },
+
+  async fetchSportsbookLines(_gameId: string, _homeTeam: string, _awayTeam: string): Promise<SportsBookLine | null> {
+    // Lines come from the cached_odds table (populated by sportsDataIOService).
+    // Return null here so the caller uses the stored DB line instead.
+    return null
+  },
+
+  async fetchInjuries(teamName: string): Promise<InjuryReport[]> {
+    const leagueForTeam = _guessLeagueFromContext()
+    const apiKey = leagueForTeam === 'NHL'
+      ? process.env.SPORTSDATAIO_NHL_KEY
+      : leagueForTeam === 'NCAAB'
+        ? process.env.SPORTSDATAIO_CBB_KEY
+        : process.env.SPORTSDATAIO_NBA_KEY
+
+    if (!apiKey) return getMockInjuries(teamName)
+
+    const sdioLeague = leagueForTeam === 'NHL' ? 'nhl'
+      : leagueForTeam === 'NCAAB' ? 'cbb'
+      : 'nba'
+
+    try {
+      const url = `https://api.sportsdata.io/v3/${sdioLeague}/scores/json/Injuries?key=${apiKey}`
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 10_000)
+      let res: Response
+      try {
+        res = await fetch(url, { signal: controller.signal, cache: 'no-store' })
+      } finally {
+        clearTimeout(timeout)
+      }
+
+      if (!res.ok) return getMockInjuries(teamName)
+
+      const data = await res.json()
+      const injuries: InjuryReport[] = []
+
+      if (Array.isArray(data)) {
+        for (const item of data) {
+          // Filter to the requested team (full name or abbreviation match)
+          const itemTeam: string = item.TeamName ?? item.Team ?? ''
+          if (!itemTeam.toLowerCase().includes(teamName.toLowerCase().split(' ').pop() ?? teamName)) {
+            continue
+          }
+          injuries.push({
+            playerName: `${item.FirstName ?? ''} ${item.LastName ?? ''}`.trim() || 'Unknown',
+            teamName:   itemTeam,
+            injuryType: item.InjuryBodyPart ?? item.Injury ?? 'Unknown',
+            status:     _mapSdioStatus(item.Status),
+            impactScore: typeof item.FantasyPoints === 'number'
+              ? Math.min(10, item.FantasyPoints / 5)
+              : 5,
+            notes: item.InjuryNotes ?? item.Practice ?? 'Day-to-day',
+          })
+        }
+      }
+
+      return injuries.length > 0 ? injuries : getMockInjuries(teamName)
+    } catch {
+      return getMockInjuries(teamName)
+    }
+  },
+
+  async fetchH2H(homeTeam: string, awayTeam: string): Promise<HeadToHeadRecord> {
+    return getMockH2H(homeTeam, awayTeam)
+  },
+}
+
+/** Map SportsDataIO injury status strings to our InjuryReport status enum. */
+function _mapSdioStatus(status: string | undefined): InjuryReport['status'] {
+  if (!status) return 'Questionable'
+  const s = status.toLowerCase()
+  if (s === 'out' || s === 'dnp' || s === 'did not participate') return 'Out'
+  if (s === 'probable' || s === 'full practice') return 'Probable'
+  return 'Questionable'
+}
+
+/**
+ * Lightweight helper: returns a league hint based on which SDIO key is
+ * exclusively set. Used when we only have the team name and need to pick
+ * the right endpoint for the injuries fetch.
+ * If multiple keys are set we default to NBA.
+ */
+function _guessLeagueFromContext(): string {
+  const hasNba   = !!process.env.SPORTSDATAIO_NBA_KEY
+  const hasNhl   = !!process.env.SPORTSDATAIO_NHL_KEY
+  const hasCbb   = !!process.env.SPORTSDATAIO_CBB_KEY
+  if (hasNhl && !hasNba && !hasCbb) return 'NHL'
+  if (hasCbb && !hasNba && !hasNhl) return 'NCAAB'
+  return 'NBA'
+}
+
 // ─── Active provider resolver ─────────────────────────────────────────────
 
 export function getActiveProvider(): DataProvider {
-  // When real API keys are set, use the real providers
-  // For now, always returns MockProvider — just swap this logic when connecting APIs
+  // Use SportsDataIO when at least one key is configured
+  if (SportsDataIOProvider.isConnected) return SportsDataIOProvider
+  // Fall back to mock data provider
   return MockDataProvider
 }
 

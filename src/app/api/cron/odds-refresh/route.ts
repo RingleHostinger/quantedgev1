@@ -66,32 +66,36 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Step 2: Refresh odds from The Odds API ────────────────────────────────
-  let oddsResult: Awaited<ReturnType<typeof refreshOddsCache>> | { success: false; error: string } = {
+  let oddsResult: Awaited<ReturnType<typeof refreshOddsCache>> | { success: false; error: string; errors?: string[] } = {
     success: false,
     error: 'Not attempted',
   }
   try {
     oddsResult = await refreshOddsCache()
-    console.log('[cron/odds-refresh] Odds refreshed — success:', oddsResult.success)
+    if (oddsResult.success) {
+      console.log('[cron/odds-refresh] Odds refreshed — success. Sports:', (oddsResult as Awaited<ReturnType<typeof refreshOddsCache>>).sportsRefreshed?.join(', '))
+    } else {
+      const errs = (oddsResult as { errors?: string[] }).errors ?? []
+      console.warn('[cron/odds-refresh] Odds refresh returned success=false. Errors:', errs.join(' | '))
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    console.error('[cron/odds-refresh] Odds refresh error:', msg)
+    console.error('[cron/odds-refresh] Odds refresh threw:', msg)
     oddsResult = { success: false, error: msg }
   }
 
   // ── Step 3: Sync odds → games + recalculate predictions ──────────────────
+  // Always attempt sync even if odds refresh failed — the cache may still have
+  // valid data from a previous successful run, and syncing it ensures predictions
+  // and official picks stay up to date.
   let syncResult: Awaited<ReturnType<typeof syncOddsToGamesAndPredictions>> | { error: string } | null = null
-  if (oddsResult.success) {
-    try {
-      syncResult = await syncOddsToGamesAndPredictions()
-      console.log('[cron/odds-refresh] Sync + predictions complete')
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      console.error('[cron/odds-refresh] Sync error:', msg)
-      syncResult = { error: msg }
-    }
-  } else {
-    console.warn('[cron/odds-refresh] Skipping sync — odds refresh failed')
+  try {
+    syncResult = await syncOddsToGamesAndPredictions()
+    console.log('[cron/odds-refresh] Sync + predictions complete')
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[cron/odds-refresh] Sync error:', msg)
+    syncResult = { error: msg }
   }
 
   // ── Step 4: Fetch final scores for completed games ────────────────────────
@@ -133,6 +137,9 @@ export async function POST(req: NextRequest) {
         scoresUpdated: scoresResult.updated,
         picksGraded: gradingResult.resolved,
         oddsSuccess: oddsResult.success,
+        oddsErrors: (oddsResult as { errors?: string[] }).errors?.slice(0, 3) ?? [],
+        sportsRefreshed: (oddsResult as { sportsRefreshed?: string[] }).sportsRefreshed ?? [],
+        syncErrors: syncResult && 'error' in syncResult ? [(syncResult as { error: string }).error] : [],
       }),
     })
   } catch (logErr) {

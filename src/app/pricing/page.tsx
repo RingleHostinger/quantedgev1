@@ -4,7 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  Star, Check, Shield, ChevronDown, ChevronUp, Lock, Trophy, FlaskConical, Zap,
+  Star, Check, Shield, ChevronDown, ChevronUp, Lock, Trophy, FlaskConical, Zap, Brain, Target, Cpu,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { QuantEdgeLogo } from '@/components/QuantEdgeLogo'
@@ -166,16 +166,59 @@ export default function PublicPricingPage() {
         {/* Header */}
         <div className="text-center space-y-3">
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full mb-2 text-xs font-semibold"
-            style={{ background: 'rgba(0,255,163,0.1)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.25)' }}>
+            style={{ background: 'rgba(245,158,11,0.12)', color: '#F59E0B', border: '1px solid rgba(245,158,11,0.3)' }}>
             <Zap className="w-3 h-3" />
-            AI-Powered Sports Intelligence
+            March Madness AI
           </div>
           <h1 className="text-4xl font-black" style={{ color: '#E6E6FA' }}>
             Simple, Transparent Pricing
           </h1>
           <p className="text-base max-w-xl mx-auto" style={{ color: '#A0A0B0' }}>
-            Start free with 1 AI pick per day. Upgrade for full access to edges, bracket tools, and real-time AI insights.
+            AI-powered March Madness tools to dominate your survivor pool and bracket.
           </p>
+        </div>
+
+        {/* Conversion section */}
+        <div className="rounded-2xl px-6 py-7"
+          style={{ background: 'linear-gradient(135deg, rgba(245,158,11,0.07), rgba(0,255,163,0.05))', border: '1px solid rgba(245,158,11,0.2)' }}>
+          <h2 className="text-2xl font-black mb-1.5 text-center" style={{ color: '#E6E6FA' }}>
+            Win Your March Madness Survivor Pool With AI
+          </h2>
+          <p className="text-sm text-center mb-6 max-w-2xl mx-auto" style={{ color: '#A0A0B0' }}>
+            QuantEdge AI analyzes win probability, public pick trends, and runs thousands of tournament simulations — so you always know the smartest pick to advance.
+          </p>
+          <div className="grid sm:grid-cols-3 gap-4">
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
+                style={{ background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.25)' }}>
+                <Brain className="w-4 h-4" style={{ color: '#F59E0B' }} />
+              </div>
+              <div>
+                <p className="text-sm font-semibold" style={{ color: '#E6E6FA' }}>AI Survivor Pool strategy engine</p>
+                <p className="text-xs mt-0.5" style={{ color: '#6B6B80' }}>Round-by-round pick recommendations tailored to your pool</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
+                style={{ background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.25)' }}>
+                <Cpu className="w-4 h-4" style={{ color: '#F59E0B' }} />
+              </div>
+              <div>
+                <p className="text-sm font-semibold" style={{ color: '#E6E6FA' }}>10,000 tournament simulations</p>
+                <p className="text-xs mt-0.5" style={{ color: '#6B6B80' }}>Monte Carlo modeling surfaces teams most likely to survive</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
+                style={{ background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.25)' }}>
+                <Target className="w-4 h-4" style={{ color: '#F59E0B' }} />
+              </div>
+              <div>
+                <p className="text-sm font-semibold" style={{ color: '#E6E6FA' }}>Smart bracket optimization</p>
+                <p className="text-xs mt-0.5" style={{ color: '#6B6B80' }}>Balance chalk and value picks to maximize pool equity</p>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Active plan banners (logged-in users only) */}
@@ -252,18 +295,30 @@ export default function PublicPricingPage() {
             )}
           </div>
 
-          {/* ── MADNESS SPECIAL ──────────────────────────────────────────── */}
-          <div className="rounded-2xl p-6 flex flex-col relative"
+          {/* ── MADNESS SPECIAL — visual focus / most popular ────────────── */}
+          <div className="rounded-2xl flex flex-col relative"
             style={{
-              background: 'linear-gradient(135deg, rgba(245,158,11,0.07), rgba(251,191,36,0.05))',
+              padding: '1.75rem',
+              background: 'linear-gradient(135deg, rgba(245,158,11,0.12), rgba(251,191,36,0.07))',
               border: isMadness && !isPremium
-                ? '1px solid rgba(245,158,11,0.5)'
-                : '1px solid rgba(245,158,11,0.25)',
-              boxShadow: isMadness && !isPremium ? '0 0 24px rgba(245,158,11,0.1)' : 'none',
+                ? '2px solid rgba(245,158,11,0.7)'
+                : '2px solid rgba(245,158,11,0.45)',
+              boxShadow: isMadness && !isPremium
+                ? '0 0 40px rgba(245,158,11,0.18), inset 0 0 40px rgba(245,158,11,0.04)'
+                : '0 0 32px rgba(245,158,11,0.14), inset 0 0 40px rgba(245,158,11,0.03)',
             }}>
+            {/* Most Popular badge — always shown unless current plan overrides */}
+            {!(isMadness && !isPremium) && !isPremium && (
+              <div className="absolute -top-3.5 left-1/2 -translate-x-1/2">
+                <div className="text-xs font-black px-4 py-1 rounded-full whitespace-nowrap"
+                  style={{ background: '#F59E0B', color: '#0F0F1A' }}>
+                  Most Popular
+                </div>
+              </div>
+            )}
             {isMadness && !isPremium && (
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                <div className="text-xs font-black px-4 py-1 rounded-full"
+              <div className="absolute -top-3.5 left-1/2 -translate-x-1/2">
+                <div className="text-xs font-black px-4 py-1 rounded-full whitespace-nowrap"
                   style={{ background: '#F59E0B', color: '#0F0F1A' }}>
                   Current Plan
                 </div>
@@ -339,17 +394,8 @@ export default function PublicPricingPage() {
                 : '1px solid rgba(0,255,163,0.28)',
               boxShadow: isPremium
                 ? '0 0 30px rgba(0,255,163,0.12)'
-                : '0 0 30px rgba(0,255,163,0.06)',
+                : '0 0 20px rgba(0,255,163,0.04)',
             }}>
-            {/* Most Popular badge — always show unless user is already premium */}
-            {!isPremium && (
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                <div className="text-xs font-black px-4 py-1 rounded-full"
-                  style={{ background: '#00FFA3', color: '#0F0F1A' }}>
-                  Most Popular
-                </div>
-              </div>
-            )}
             {isPremium && (
               <div className="absolute -top-3 left-1/2 -translate-x-1/2">
                 <div className="text-xs font-black px-4 py-1 rounded-full"

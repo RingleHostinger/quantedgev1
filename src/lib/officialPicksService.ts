@@ -114,8 +114,11 @@ export async function selectAndInsertOfficialPicks(): Promise<OfficialPicksResul
   // Filter: only games with abs(spread_edge) >= 1.5 qualify for official picks
   const qualified = rows.filter((r) => Math.abs(r.spread_edge ?? 0) >= 1.5)
 
+  console.info(`[officialPicksService] Candidates from prediction_cache: ${rows.length}, qualified (edge>=1.5): ${qualified.length}`)
+
   // No strong edges today — skip inserts entirely
   if (qualified.length === 0) {
+    console.info('[officialPicksService] No picks qualify — minimum edge threshold not met')
     return { inserted: 0, skipped: 0, errors: [] }
   }
 
@@ -233,6 +236,7 @@ export async function replaceOfficialPicksForDay(
 
   // Step 3: Filter for minimum edge quality, take top 5
   const qualified = rows.filter((r) => Math.abs(r.spread_edge ?? 0) >= 1.5)
+  console.info(`[officialPicksService:replace] Slate window: ${slateStart} → ${slateEnd}. Candidates: ${rows.length}, qualified (edge>=1.5): ${qualified.length}`)
   if (qualified.length === 0) return { inserted: 0, skipped: 0, errors: [] }
 
   const top5 = qualified.slice(0, 5)

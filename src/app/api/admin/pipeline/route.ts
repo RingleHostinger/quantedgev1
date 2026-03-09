@@ -29,7 +29,7 @@ import {
   updateClosingLines,
   selectAndInsertOfficialPicks,
 } from '@/lib/officialPicksService'
-import { getTodaySlateGameIds } from '@/lib/slateUtils'
+import { getTodaySlateGameIds, getTodaySlateRange, filterToWindow } from '@/lib/slateUtils'
 
 async function verifyAdmin(): Promise<boolean> {
   const session = await getSession()
@@ -217,34 +217,57 @@ export async function GET() {
   }
 
   // Fetch slate info and other data in parallel.
-  // getTodaySlateGameIds() uses lt-only + JS-filter to work around nubase .gte+.lt bug.
-  // count:exact returns null in nubase, so we fetch rows and use .length instead.
+  // Uses lt-only + JS-filter to work around nubase .gte+.lt bug.
+  const { start, end } = getTodaySlateRange()
+
   const [
     oddsResult,
     engineResult,
     pendingPicksResult,
-    slateInfo,
+    slateRows,
     allPicks,
+    recentRuns,
   ] = await Promise.all([
-    supabaseAdmin.from('cached_odds').select('last_updated').order('last_updated', { ascending: false }).limit(1).single(),
-    supabaseAdmin.from('engine_runs').select('run_at, status').order('run_at', { ascending: false }).limit(1).single(),
-    supabaseAdmin.from('official_picks').select('id').eq('result', 'pending'),
-    getTodaySlateGameIds(),
+    supabaseAdmin.from('cached_odds').select('last_updated, league').order('last_updated', { ascending: false }),
+    supabaseAdmin.from('engine_runs').select('run_at, status, notes').order('run_at', { ascending: false }).limit(1).single(),
+    supabaseAdmin.from('official_picks').select('id, league, result, commence_time').eq('result', 'pending'),
+    supabaseAdmin.from('prediction_cache').select('game_id, league, commence_time').lt('commence_time', end).order('commence_time', { ascending: true }),
     supabaseAdmin.from('official_picks').select('result').in('result', ['win', 'loss', 'push']),
+    supabaseAdmin.from('engine_runs').select('run_at, trigger, duration_ms, games_processed, notes').order('run_at', { ascending: false }).limit(5),
   ])
 
   const wins = (allPicks.data ?? []).filter((p) => p.result === 'win').length
   const losses = (allPicks.data ?? []).filter((p) => p.result === 'loss').length
   const pushes = (allPicks.data ?? []).filter((p) => p.result === 'push').length
 
+  // Per-league slate counts (JS-filter for lower bound)
+  const slateGames = filterToWindow(slateRows.data ?? [], 'commence_time', start)
+  const slateByLeague: Record<string, number> = {}
+  for (const g of slateGames) {
+    const league = (g as Record<string, unknown>).league as string
+    slateByLeague[league] = (slateByLeague[league] ?? 0) + 1
+  }
+
+  // Per-league cached_odds counts
+  const oddsByLeague: Record<string, number> = {}
+  for (const row of (oddsResult.data ?? [])) {
+    const league = (row as Record<string, unknown>).league as string
+    oddsByLeague[league] = (oddsByLeague[league] ?? 0) + 1
+  }
+  const lastOddsRefresh = (oddsResult.data ?? [])[0]?.last_updated ?? null
+
   return NextResponse.json({
-    lastOddsRefresh: oddsResult.data?.last_updated ?? null,
+    lastOddsRefresh,
+    oddsByLeague,
     lastPredictionRun: engineResult.data?.run_at ?? null,
     lastEngineStatus: engineResult.data?.status ?? null,
-    slateStart: slateInfo.slateStart,
-    slateEnd: slateInfo.slateEnd,
-    gamesInSlate: slateInfo.count,
+    lastRunNotes: engineResult.data?.notes ?? null,
+    slateStart: start,
+    slateEnd: end,
+    gamesInSlate: slateGames.length,
+    slateByLeague,
     pendingPicksToGrade: (pendingPicksResult.data ?? []).length,
     modelStats: { wins, losses, pushes },
+    recentRuns: recentRuns.data ?? [],
   })
 }
