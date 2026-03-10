@@ -60,6 +60,7 @@ export async function POST(req: NextRequest) {
       payment_method_types: ['card'],
       line_items: [{ price: priceId, quantity: 1 }],
       mode: 'subscription',
+      allow_promotion_codes: true,
       success_url: `${APP_URL}/dashboard?upgrade=success`,
       cancel_url: `${APP_URL}/dashboard/pricing?upgrade=cancelled`,
       // Store which plan was purchased so the webhook can set plan_type correctly

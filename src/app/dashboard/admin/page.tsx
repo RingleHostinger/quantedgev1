@@ -131,6 +131,34 @@ export default function AdminPage() {
   const [pipelineResults, setPipelineResults] = useState<PipelineStepResult[]>([])
   const [pipelineMsg, setPipelineMsg] = useState('')
 
+  // Reset / danger zone state
+  const [resetConfirm, setResetConfirm] = useState<'clear_picks' | 'reset_stats' | null>(null)
+  const [resetRunning, setResetRunning] = useState(false)
+  const [resetMsg, setResetMsg] = useState('')
+
+  const handleResetAction = async (action: 'clear_picks' | 'reset_stats') => {
+    setResetRunning(true)
+    setResetMsg('')
+    setResetConfirm(null)
+    try {
+      const res = await fetch('/api/admin/reset-contest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setResetMsg(`Error: ${data.error ?? 'Unknown error'}`)
+      } else {
+        setResetMsg(data.message ?? 'Done.')
+      }
+    } catch {
+      setResetMsg('Network error — please try again.')
+    } finally {
+      setResetRunning(false)
+    }
+  }
+
   // Pick grading state
   interface OfficialPick {
     id: string
@@ -858,6 +886,96 @@ export default function AdminPage() {
                       <div className="text-xs" style={{ color: '#4A4A5A' }}>{description}</div>
                     </div>
                   ))}
+                </div>
+              </div>
+
+              {/* ── Danger Zone ─────────────────────────────────── */}
+              <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(255,107,107,0.2)' }}>
+                <div className="px-5 py-3 flex items-center gap-2" style={{ background: 'rgba(255,107,107,0.06)' }}>
+                  <AlertTriangle className="w-4 h-4" style={{ color: '#FF6B6B' }} />
+                  <span className="text-xs font-bold uppercase tracking-widest" style={{ color: '#FF6B6B' }}>Danger Zone</span>
+                </div>
+                <div className="p-5 space-y-4" style={{ background: 'rgba(255,107,107,0.02)' }}>
+
+                  {/* Confirmation prompt */}
+                  {resetConfirm && (
+                    <div className="rounded-xl p-4" style={{ background: 'rgba(255,107,107,0.08)', border: '1px solid rgba(255,107,107,0.25)' }}>
+                      <p className="text-sm font-semibold mb-1" style={{ color: '#FF6B6B' }}>
+                        {resetConfirm === 'clear_picks'
+                          ? 'Clear all official picks (pending + settled)?'
+                          : 'Reset model stats to 0-0-0?'}
+                      </p>
+                      <p className="text-xs mb-3" style={{ color: '#A0A0B0' }}>
+                        {resetConfirm === 'clear_picks'
+                          ? 'This permanently removes every official pick. This cannot be undone.'
+                          : 'This deletes all settled and pending official picks so the W-L-P record resets to zero. This cannot be undone.'}
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleResetAction(resetConfirm)}
+                          disabled={resetRunning}
+                          className="px-4 py-2 rounded-lg text-xs font-bold transition-all hover:opacity-80 disabled:opacity-40"
+                          style={{ background: 'rgba(255,107,107,0.15)', color: '#FF6B6B', border: '1px solid rgba(255,107,107,0.3)' }}
+                        >
+                          {resetRunning ? 'Running...' : 'Yes, confirm'}
+                        </button>
+                        <button
+                          onClick={() => setResetConfirm(null)}
+                          disabled={resetRunning}
+                          className="px-4 py-2 rounded-lg text-xs font-semibold transition-all hover:opacity-80"
+                          style={{ background: 'rgba(255,255,255,0.05)', color: '#A0A0B0', border: '1px solid rgba(255,255,255,0.1)' }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Reset message */}
+                  {resetMsg && !resetConfirm && (
+                    <div className="p-3 rounded-xl text-xs font-medium"
+                      style={{
+                        background: resetMsg.toLowerCase().startsWith('error') ? 'rgba(255,107,107,0.1)' : 'rgba(0,255,163,0.08)',
+                        color: resetMsg.toLowerCase().startsWith('error') ? '#FF6B6B' : '#00FFA3',
+                        border: resetMsg.toLowerCase().startsWith('error') ? '1px solid rgba(255,107,107,0.2)' : '1px solid rgba(0,255,163,0.15)',
+                      }}>
+                      {resetMsg}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* Clear Official Picks */}
+                    <div className="p-4 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                      <div className="text-xs font-bold mb-1" style={{ color: '#E6E6FA' }}>Clear Official Picks</div>
+                      <p className="text-xs mb-3" style={{ color: '#6B6B80' }}>
+                        Removes all pending and settled official picks. Model stats will show 0-0-0 after.
+                      </p>
+                      <button
+                        onClick={() => { setResetConfirm('clear_picks'); setResetMsg('') }}
+                        disabled={resetRunning || resetConfirm !== null}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:opacity-80 disabled:opacity-40"
+                        style={{ background: 'rgba(255,107,107,0.12)', color: '#FF6B6B', border: '1px solid rgba(255,107,107,0.25)' }}
+                      >
+                        Clear All Picks
+                      </button>
+                    </div>
+
+                    {/* Reset Model Stats */}
+                    <div className="p-4 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                      <div className="text-xs font-bold mb-1" style={{ color: '#E6E6FA' }}>Reset Model Stats</div>
+                      <p className="text-xs mb-3" style={{ color: '#6B6B80' }}>
+                        Resets W-L-P record to 0-0-0 by clearing all settled picks. Pending picks also removed for consistency.
+                      </p>
+                      <button
+                        onClick={() => { setResetConfirm('reset_stats'); setResetMsg('') }}
+                        disabled={resetRunning || resetConfirm !== null}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:opacity-80 disabled:opacity-40"
+                        style={{ background: 'rgba(255,107,107,0.12)', color: '#FF6B6B', border: '1px solid rgba(255,107,107,0.25)' }}
+                      >
+                        Reset to 0-0-0
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
 

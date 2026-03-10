@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/integrations/supabase/server'
 import { getSession } from '@/lib/auth'
 import { getEdgeTier, getConfidenceTier } from '@/lib/prediction-engine'
-import { getTodaySlateGameIds } from '@/lib/slateUtils'
+import { getTodaySlateGameIds, getTodaySlateRange } from '@/lib/slateUtils'
 
 export async function GET() {
   const session = await getSession()
@@ -19,8 +19,15 @@ export async function GET() {
   }
 
   // Fetch predictions for TODAY's slate only (EST sports day: 2 AM ET boundary).
-  // Uses lt-only + JS-filter workaround for nubase .gte+.lt bug.
-  const { gameIds: todayGameIds } = await getTodaySlateGameIds()
+  // Two-layer defense:
+  //   1. game_id IN list from prediction_cache (already window-filtered)
+  //   2. Hard upper-bound on scheduled_at via .lt(slateEnd) to block any
+  //      future games that may have leaked into the predictions table from
+  //      a prior engine run, plus JS-filter >= slateStart as the nubase workaround.
+  const { gameIds: todayGameIds, slateStart, slateEnd } = await getTodaySlateGameIds()
+
+  // Also get the current range directly for the hard DB filter
+  const { end: hardEnd } = getTodaySlateRange()
 
   // If no games for today's slate, return empty immediately
   if (todayGameIds.length === 0) {
@@ -70,7 +77,19 @@ export async function GET() {
   }
 
   // Filter out predictions where game relation is null
-  const filtered = (predictions || []).filter((p) => p.games !== null)
+  // Also enforce hard window on scheduled_at to block future-day leakage:
+  // any prediction whose game.scheduled_at falls outside [slateStart, slateEnd) is excluded.
+  const slateStartMs = new Date(slateStart).getTime()
+  const slateEndMs = new Date(hardEnd).getTime()
+
+  const filtered = (predictions || []).filter((p) => {
+    if (p.games === null) return false
+    const game = p.games as Record<string, unknown>
+    const scheduledAt = game?.scheduled_at as string | null
+    if (!scheduledAt) return false
+    const t = new Date(scheduledAt).getTime()
+    return t >= slateStartMs && t < slateEndMs
+  })
 
   const enriched = filtered.map((p) => {
     const game = p.games as Record<string, unknown>
