@@ -906,21 +906,85 @@ export default function AdminPage() {
                             )}
                             {r.step === 'refresh_odds' && r.detail && (() => {
                               const d = r.detail as Record<string, unknown>
-                              const sports = Array.isArray(d.sportsRefreshed) ? (d.sportsRefreshed as string[]) : []
+                              // SdioRefreshResult uses leaguesRefreshed (not sportsRefreshed)
+                              const leagues = Array.isArray(d.leaguesRefreshed) ? (d.leaguesRefreshed as string[]) : []
                               const errors = Array.isArray(d.errors) ? (d.errors as string[]) : []
+                              const hasSdioKey = !d.error || !(d.error as string).includes('not configured')
                               return (
                                 <>
-                                  <div style={{ color: d.hasApiKey === false ? '#FF6B6B' : undefined }}>
-                                    API Key: {d.hasApiKey === false ? 'MISSING' : 'OK'}
+                                  <div style={{ color: !hasSdioKey ? '#FF6B6B' : undefined }}>
+                                    SportsDataIO Key: {!hasSdioKey ? 'MISSING' : 'OK'}
                                   </div>
                                   <div>Fetched: {String(d.totalFetched ?? 0)} games</div>
                                   <div>Updated: {String(d.totalUpserted ?? 0)} records</div>
-                                  {sports.length > 0 && (
-                                    <div>Sports: {sports.map(s => s.split('_').pop()?.toUpperCase()).join(', ')}</div>
+                                  {leagues.length > 0 && (
+                                    <div>Leagues: {leagues.join(', ')}</div>
                                   )}
                                   {d.refreshedAt && (
                                     <div>At: {new Date(String(d.refreshedAt)).toLocaleTimeString()}</div>
                                   )}
+                                  {errors.length > 0 && (
+                                    <div style={{ color: '#F59E0B' }}>Errors: {errors.join(' | ')}</div>
+                                  )}
+                                </>
+                              )
+                            })()}
+                            {r.step === 'refresh_scores' && r.detail && (() => {
+                              const d = r.detail as Record<string, unknown>
+                              const errors = Array.isArray(d.errors) ? (d.errors as string[]) : []
+                              return (
+                                <>
+                                  <div>Scores updated: {String(d.updated ?? 0)} games</div>
+                                  {errors.length > 0 && (
+                                    <div style={{ color: '#F59E0B' }}>Errors: {errors.join(' | ')}</div>
+                                  )}
+                                </>
+                              )
+                            })()}
+                            {r.step === 'refresh_injuries' && r.detail && (() => {
+                              const d = r.detail as Record<string, unknown>
+                              const errors = Array.isArray(d.errors) ? (d.errors as string[]) : []
+                              return (
+                                <>
+                                  <div>Cached: {String(d.cached ?? 0)} players</div>
+                                  {d.cachedAt && <div>At: {new Date(String(d.cachedAt)).toLocaleTimeString()}</div>}
+                                  {errors.length > 0 && (
+                                    <div style={{ color: '#F59E0B' }}>Errors: {errors.join(' | ')}</div>
+                                  )}
+                                </>
+                              )
+                            })()}
+                            {r.step === 'refresh_betting_splits' && r.detail && (() => {
+                              const d = r.detail as Record<string, unknown>
+                              const errors = Array.isArray(d.errors) ? (d.errors as string[]) : []
+                              const summary = (d.leagueSummary ?? {}) as Record<string, { gamesFound: number; splitsFetched: number }>
+                              const summaryLines = Object.entries(summary).map(
+                                ([lg, s]) => `${lg}: ${s.splitsFetched}/${s.gamesFound} games`
+                              )
+                              return (
+                                <>
+                                  <div>Cached: {String(d.cached ?? 0)} splits</div>
+                                  {summaryLines.length > 0 && (
+                                    <div>By league: {summaryLines.join(', ')}</div>
+                                  )}
+                                  {d.cachedAt && <div>At: {new Date(String(d.cachedAt)).toLocaleTimeString()}</div>}
+                                  {errors.length > 0 && (
+                                    <div style={{ color: '#F59E0B' }}>
+                                      Errors ({errors.length}): {errors.slice(0, 3).join(' | ')}
+                                      {errors.length > 3 && ` … +${errors.length - 3} more`}
+                                    </div>
+                                  )}
+                                </>
+                              )
+                            })()}
+                            {r.step === 'refresh_schedules' && r.detail && (() => {
+                              const d = r.detail as Record<string, unknown>
+                              const errors = Array.isArray(d.errors) ? (d.errors as string[]) : []
+                              const leagues = Array.isArray(d.leagues) ? (d.leagues as string[]) : []
+                              return (
+                                <>
+                                  <div>Cached: {String(d.cached ?? 0)} games</div>
+                                  {leagues.length > 0 && <div>Leagues: {leagues.join(', ')}</div>}
                                   {errors.length > 0 && (
                                     <div style={{ color: '#F59E0B' }}>Errors: {errors.join(' | ')}</div>
                                   )}

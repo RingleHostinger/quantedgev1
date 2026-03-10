@@ -61,13 +61,14 @@ interface LeagueConfig {
   injuryPath: string       // base path for InjuredPlayers endpoint (differs by league)
   hasInjuryFeed: boolean   // whether InjuredPlayers endpoint is available for this league
   hasBettingSplits: boolean // whether BettingSplitsByGameId is available
+  hasOddsFeed: boolean     // whether GameOddsByDate endpoint is available (subscription-dependent)
 }
 
 const SDIO_LEAGUES: LeagueConfig[] = [
-  { sdioKey: 'nba', league: 'NBA',   sport: 'Basketball', injuryPath: 'projections', hasInjuryFeed: true,  hasBettingSplits: true  },
-  { sdioKey: 'nhl', league: 'NHL',   sport: 'Hockey',     injuryPath: 'projections', hasInjuryFeed: true,  hasBettingSplits: true  },
-  { sdioKey: 'cbb', league: 'NCAAB', sport: 'Basketball', injuryPath: 'scores',      hasInjuryFeed: true,  hasBettingSplits: true  },
-  { sdioKey: 'mlb', league: 'MLB',   sport: 'Baseball',   injuryPath: 'projections', hasInjuryFeed: false, hasBettingSplits: false },
+  { sdioKey: 'nba', league: 'NBA',   sport: 'Basketball', injuryPath: 'projections', hasInjuryFeed: true,  hasBettingSplits: true,  hasOddsFeed: true  },
+  { sdioKey: 'nhl', league: 'NHL',   sport: 'Hockey',     injuryPath: 'projections', hasInjuryFeed: true,  hasBettingSplits: true,  hasOddsFeed: true  },
+  { sdioKey: 'cbb', league: 'NCAAB', sport: 'Basketball', injuryPath: 'scores',      hasInjuryFeed: true,  hasBettingSplits: true,  hasOddsFeed: true  },
+  { sdioKey: 'mlb', league: 'MLB',   sport: 'Baseball',   injuryPath: 'projections', hasInjuryFeed: false, hasBettingSplits: false, hasOddsFeed: false },
 ]
 
 // ─── SportsDataIO response types ───────────────────────────────────────────────
@@ -92,7 +93,7 @@ interface SDIOGameOdds {
 
 interface SDIOGame {
   GameId:        number
-  DateTime:      string   // ISO: "2026-03-09T19:30:00"
+  DateTime:      string | null  // ISO: "2026-03-09T19:30:00" — may be null for TBD games
   Status:        string   // "Scheduled" | "Final" | "InProgress" | "Postponed" | "Canceled"
   HomeTeam:      string   // abbreviation e.g. "BOS"
   AwayTeam:      string   // abbreviation e.g. "LAL"
@@ -235,15 +236,19 @@ async function fetchLeagueData(
   const dates = getSdioFetchDates()
   const now = new Date().toISOString()
 
-  // Fetch all dates in parallel
+  // Fetch games for all dates in parallel
   const gamesByDate = await Promise.all(dates.map((d) => fetchGamesByDate(config.sdioKey, apiKey, d)))
-  const oddsByDate  = await Promise.all(dates.map((d) => fetchOddsByDate(config.sdioKey, apiKey, d)))
+
+  // Only fetch odds if this league has the odds subscription feed enabled
+  const oddsByDate: SDIOGameOdds[][] = config.hasOddsFeed
+    ? await Promise.all(dates.map((d) => fetchOddsByDate(config.sdioKey, apiKey, d)))
+    : dates.map(() => [])
 
   // Flatten
   const allGames: SDIOGame[]     = gamesByDate.flat()
   const allOdds:  SDIOGameOdds[] = oddsByDate.flat()
 
-  console.info(`[sportsDataIOService] ${config.league}: ${allGames.length} games across ${dates.length} date(s)`)
+  console.info(`[sportsDataIOService] ${config.league}: ${allGames.length} games across ${dates.length} date(s), hasOddsFeed=${config.hasOddsFeed}, odds=${allOdds.length}`)
 
   if (!allGames.length) return { rows: [], gameCount: 0 }
 
@@ -259,18 +264,22 @@ async function fetchLeagueData(
     // Skip games that are canceled / postponed
     if (game.Status === 'Canceled' || game.Status === 'Postponed') continue
 
-    // Use full team name when available, fall back to abbreviation
-    const homeTeam = game.HomeTeamName || game.HomeTeam
-    const awayTeam = game.AwayTeamName || game.AwayTeam
-    const gameId   = buildGameId(game.GameId)
+    // Skip TBD games with no scheduled time — commence_time is NOT NULL in cached_odds
+    if (!game.DateTime) continue
 
-    // Convert ISO timestamp to UTC ISO string
-    // SportsDataIO returns "2026-03-09T19:30:00" without timezone — treat as ET
-    // Add the UTC offset ourselves (ET = UTC-5 in winter, UTC-4 in summer)
-    // Simplest safe approach: store as-is with Z suffix (won't be off by more than 1h)
+    // Use full team name when available, fall back to abbreviation
+    const homeTeam = game.HomeTeamName || game.HomeTeam || ''
+    const awayTeam = game.AwayTeamName || game.AwayTeam || ''
+    if (!homeTeam || !awayTeam) continue  // skip malformed game records
+
+    const gameId = buildGameId(game.GameId)
+
+    // Convert ISO timestamp to UTC ISO string.
+    // SportsDataIO returns "2026-03-09T19:30:00" without timezone — treated as ET.
+    // We append Z as a safe approximation (±1h max drift, acceptable for slate matching).
     const commenceTime = game.DateTime.endsWith('Z') ? game.DateTime : `${game.DateTime}Z`
 
-    // Get odds for this game
+    // Get odds for this game (may be null if no odds subscription for this league)
     const gameOdds = oddsMap.get(game.GameId)
     const bestOdds = gameOdds ? pickBestOdds(gameOdds.PregameOdds) : null
     const bookmaker = bestOdds?.Sportsbook?.toLowerCase().replace(/\s+/g, '_') ?? 'sportsdata'
@@ -284,6 +293,8 @@ async function fetchLeagueData(
       commence_time:       commenceTime,
       bookmaker,
       spread:              bestOdds?.HomePointSpread ?? null,
+      // OverPayout/UnderPayout are total-line payouts — stored in spread_outcome columns
+      // as the closest available payout fields from SDIO PregameOdds
       spread_outcome_home: bestOdds?.OverPayout != null ? String(bestOdds.OverPayout) : null,
       spread_outcome_away: bestOdds?.UnderPayout != null ? String(bestOdds.UnderPayout) : null,
       total:               bestOdds?.OverUnder ?? null,
@@ -352,9 +363,14 @@ export async function refreshOddsCacheFromSdio(): Promise<SdioRefreshResult> {
     }
   }
 
-  const configuredLeagues = SDIO_LEAGUES
+  // Only process leagues that have the GameOddsByDate feed in this subscription tier
+  const configuredLeagues = SDIO_LEAGUES.filter((l) => l.hasOddsFeed)
+  const skippedLeagues    = SDIO_LEAGUES.filter((l) => !l.hasOddsFeed).map((l) => l.league)
 
-  console.info(`[sportsDataIOService] Starting refresh for leagues: ${configuredLeagues.map((l) => l.league).join(', ')}`)
+  if (skippedLeagues.length) {
+    console.info(`[sportsDataIOService] Skipping odds for leagues without feed: ${skippedLeagues.join(', ')}`)
+  }
+  console.info(`[sportsDataIOService] Starting odds refresh for: ${configuredLeagues.map((l) => l.league).join(', ')}`)
 
   await Promise.allSettled(
     configuredLeagues.map(async (config) => {
@@ -368,7 +384,7 @@ export async function refreshOddsCacheFromSdio(): Promise<SdioRefreshResult> {
           leaguesRefreshed.push(config.league)
           console.info(`[sportsDataIOService] ${config.league}: fetched=${gameCount} upserted=${upserted}`)
         } else {
-          // No games — purge stale cache rows for this league
+          // No games for this league today — purge stale cache rows
           await supabaseAdmin.from('cached_odds').delete().eq('league', config.league)
           console.info(`[sportsDataIOService] ${config.league}: 0 games — purged stale cache rows`)
         }
@@ -842,22 +858,33 @@ function parseGameBettingSplit(
 async function fetchBettingSplitsForLeague(
   config: LeagueConfig,
   apiKey: string,
-): Promise<{ splits: SdioBettingSplit[]; errors: string[] }> {
+): Promise<{ splits: SdioBettingSplit[]; errors: string[]; gamesFound: number }> {
   const dates  = getSdioFetchDates()
   const errors: string[] = []
 
   // Step 1: Get today's games to obtain their integer GameIds
-  const gamesByDate = await Promise.all(
-    dates.map((d) => fetchGamesByDate(config.sdioKey, apiKey, d).catch(() => [] as SDIOGame[]))
-  )
+  let gamesByDate: SDIOGame[][] = []
+  try {
+    gamesByDate = await Promise.all(
+      dates.map((d) => fetchGamesByDate(config.sdioKey, apiKey, d).catch((err) => {
+        errors.push(`${config.league} schedule fetch: ${err instanceof Error ? err.message : String(err)}`)
+        return [] as SDIOGame[]
+      }))
+    )
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return { splits: [], errors: [`${config.league} schedule fetch failed: ${msg}`], gamesFound: 0 }
+  }
+
   const allGames = gamesByDate.flat().filter(
     (g) => g.Status !== 'Canceled' && g.Status !== 'Postponed'
   )
 
-  if (!allGames.length) return { splits: [], errors }
+  if (!allGames.length) return { splits: [], errors, gamesFound: 0 }
 
   // Step 2: Fetch BettingSplitsByGameId for each game in parallel
   const results: SdioBettingSplit[] = []
+  let authErrorSeen = false
 
   await Promise.allSettled(
     allGames.map(async (game) => {
@@ -869,12 +896,21 @@ async function fetchBettingSplitsForLeague(
         if (!raw) return
         results.push(parseGameBettingSplit(raw, game, config.league))
       } catch (err) {
-        errors.push(`${config.league} game ${game.GameId}: ${err instanceof Error ? err.message : String(err)}`)
+        const msg = err instanceof Error ? err.message : String(err)
+        // Deduplicate auth errors — one message per league is enough
+        if (msg.includes('auth failed') || msg.includes('401') || msg.includes('403')) {
+          if (!authErrorSeen) {
+            authErrorSeen = true
+            errors.push(`${config.league}: BettingSplits subscription not active (${msg})`)
+          }
+        } else {
+          errors.push(`${config.league} game ${game.GameId}: ${msg}`)
+        }
       }
     })
   )
 
-  return { splits: results, errors }
+  return { splits: results, errors, gamesFound: allGames.length }
 }
 
 /**
@@ -883,25 +919,32 @@ async function fetchBettingSplitsForLeague(
 export async function fetchBettingSplits(): Promise<{
   splits: SdioBettingSplit[]
   errors: string[]
+  leagueSummary: Record<string, { gamesFound: number; splitsFetched: number }>
 }> {
   const allErrors: string[] = []
   const all: SdioBettingSplit[] = []
+  const leagueSummary: Record<string, { gamesFound: number; splitsFetched: number }> = {}
 
   const apiKey = getSdioApiKey()
   if (!apiKey) {
-    return { splits: [], errors: ['No SPORTSDATAIO_API_KEY env var configured'] }
+    return { splits: [], errors: ['No SPORTSDATAIO_API_KEY env var configured'], leagueSummary }
   }
 
   await Promise.allSettled(
     SDIO_LEAGUES.filter((c) => c.hasBettingSplits).map(async (config) => {
       try {
-        const { splits, errors } = await fetchBettingSplitsForLeague(config, apiKey)
+        const { splits, errors, gamesFound } = await fetchBettingSplitsForLeague(config, apiKey)
         all.push(...splits)
         allErrors.push(...errors)
-        console.info(`[sportsDataIOService] betting splits ${config.league}: ${splits.length} games`)
+        leagueSummary[config.league] = { gamesFound, splitsFetched: splits.length }
+        console.info(`[sportsDataIOService] betting splits ${config.league}: ${splits.length}/${gamesFound} games`)
+        if (errors.length) {
+          console.warn(`[sportsDataIOService] betting splits ${config.league} errors:`, errors.join(' | '))
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         allErrors.push(`${config.league}: ${msg}`)
+        leagueSummary[config.league] = { gamesFound: 0, splitsFetched: 0 }
         console.error(`[sportsDataIOService] betting splits ${config.league} FAILED:`, msg)
       }
     })
@@ -915,7 +958,7 @@ export async function fetchBettingSplits(): Promise<{
     return true
   })
 
-  return { splits: deduped, errors: allErrors }
+  return { splits: deduped, errors: allErrors, leagueSummary }
 }
 
 // ─── Future feature hooks ───────────────────────────────────────────────────────
@@ -1072,6 +1115,7 @@ export interface CacheBettingSplitsResult {
   cached: number
   errors: string[]
   cachedAt: string
+  leagueSummary: Record<string, { gamesFound: number; splitsFetched: number }>
 }
 
 /**
@@ -1079,11 +1123,11 @@ export interface CacheBettingSplitsResult {
  * Uses upsert on game_id so re-runs are safe.
  */
 export async function cacheBettingSplits(): Promise<CacheBettingSplitsResult> {
-  const { splits, errors } = await fetchBettingSplits()
+  const { splits, errors, leagueSummary } = await fetchBettingSplits()
   const cachedAt = new Date().toISOString()
 
   if (!splits.length) {
-    return { cached: 0, errors, cachedAt }
+    return { cached: 0, errors, cachedAt, leagueSummary }
   }
 
   const rows = splits.map((s) => ({
@@ -1115,11 +1159,11 @@ export async function cacheBettingSplits(): Promise<CacheBettingSplitsResult> {
 
   if (error) {
     console.error('[sportsDataIOService] cacheBettingSplits upsert error:', error.message)
-    return { cached: 0, errors: [...errors, error.message], cachedAt }
+    return { cached: 0, errors: [...errors, error.message], cachedAt, leagueSummary }
   }
 
   console.info(`[sportsDataIOService] cacheBettingSplits: ${rows.length} rows upserted`)
-  return { cached: rows.length, errors, cachedAt }
+  return { cached: rows.length, errors, cachedAt, leagueSummary }
 }
 
 // ─── Sharp money + line movement analysis ───────────────────────────────────────
