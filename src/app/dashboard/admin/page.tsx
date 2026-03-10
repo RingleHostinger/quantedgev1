@@ -886,12 +886,21 @@ export default function AdminPage() {
                         )}
                         {r.detail && (
                           <div className="text-xs mt-1 pl-6 space-y-0.5" style={{ color: '#A0A0B0' }}>
-                            {r.step === 'refresh_slate' && r.detail && (
-                              <>
-                                <div>Slate: {String(r.detail.slateStart ?? '').slice(0, 10)} EST window</div>
-                                <div>Games in window: {String(r.detail.gamesInSlate ?? 0)}</div>
-                              </>
-                            )}
+                            {r.step === 'refresh_slate' && r.detail && (() => {
+                              const d = r.detail as Record<string, unknown>
+                              const oddsByLeague = (d.cachedOddsByLeague ?? {}) as Record<string, number>
+                              const leagueLines = Object.entries(oddsByLeague).map(([lg, n]) => `${lg}: ${n}`).join(', ')
+                              return (
+                                <>
+                                  <div>Slate window: {String(d.slateStart ?? '').slice(0, 10)} EST</div>
+                                  <div>Games in prediction_cache: {String(d.gamesInSlate ?? 0)}</div>
+                                  <div style={{ color: Number(d.cachedOddsTotal ?? 0) > 0 ? '#00FFA3' : '#FF6B6B' }}>
+                                    Cached odds rows: {String(d.cachedOddsTotal ?? 0)}
+                                    {leagueLines ? ` (${leagueLines})` : ''}
+                                  </div>
+                                </>
+                              )
+                            })()}
                             {r.step === 'grade_picks' && r.detail && (
                               <>
                                 <div>Picks graded: {String(r.detail.picksGraded ?? 0)}</div>

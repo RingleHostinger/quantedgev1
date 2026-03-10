@@ -877,17 +877,29 @@ async function fetchBettingSplitsForLeague(
   }
 
   const allGames = gamesByDate.flat().filter(
-    (g) => g.Status !== 'Canceled' && g.Status !== 'Postponed'
+    (g) =>
+      g.Status !== 'Canceled' &&
+      g.Status !== 'Postponed' &&
+      // GameId must be a valid positive integer — 0 or null causes "invalid gameid" 400 from SDIO
+      typeof g.GameId === 'number' && g.GameId > 0
   )
 
   if (!allGames.length) return { splits: [], errors, gamesFound: 0 }
+
+  // Deduplicate by GameId (GamesByDate for today+tomorrow may return same game twice)
+  const seenIds = new Set<number>()
+  const uniqueGames = allGames.filter((g) => {
+    if (seenIds.has(g.GameId)) return false
+    seenIds.add(g.GameId)
+    return true
+  })
 
   // Step 2: Fetch BettingSplitsByGameId for each game in parallel
   const results: SdioBettingSplit[] = []
   let authErrorSeen = false
 
   await Promise.allSettled(
-    allGames.map(async (game) => {
+    uniqueGames.map(async (game) => {
       const url = `${SDIO_BASE}/${config.sdioKey}/odds/json/BettingSplitsByGameId/${game.GameId}?key=${apiKey}`
       try {
         const data = await sdioFetch(url)
@@ -910,7 +922,7 @@ async function fetchBettingSplitsForLeague(
     })
   )
 
-  return { splits: results, errors, gamesFound: allGames.length }
+  return { splits: results, errors, gamesFound: uniqueGames.length }
 }
 
 /**
@@ -1455,8 +1467,19 @@ export async function cacheSchedules(): Promise<CacheSchedulesResult> {
 
       if (!games.length) return
 
-      // Filter out games with no GameId or date (data quality guard)
-      const validGames = games.filter((g) => g.GameId && (g.DateTime || g.Date))
+      // Filter out games with no GameId, missing date, or missing team names (data quality guard)
+      const validGames = games.filter((g) => {
+        if (!g.GameId) return false
+        const dt = g.DateTime || g.Date
+        if (!dt) return false
+        // Ensure we can extract a valid YYYY-MM-DD from the date field
+        const dateStr = dt.slice(0, 10)
+        if (!dateStr || dateStr.length < 10) return false
+        const homeTeam = g.HomeTeamName ?? g.HomeTeam ?? ''
+        const awayTeam = g.AwayTeamName ?? g.AwayTeam ?? ''
+        if (!homeTeam || !awayTeam) return false
+        return true
+      })
       const rows = validGames.map((g) => buildScheduleRow(g, config, season, cachedAt))
 
       if (!rows.length) return

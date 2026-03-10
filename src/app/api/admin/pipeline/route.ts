@@ -124,18 +124,33 @@ async function doRefreshSlate() {
   // Slate filtering is computed at query time — no DB action needed.
   // We return the current window so the admin can see what's active.
   // Uses getTodaySlateGameIds() which applies .lt(end) + JS-filter workaround for nubase.
+  const start = Date.now()
   const { gameIds, slateStart, slateEnd, count } = await getTodaySlateGameIds()
+
+  // Also pull cached_odds row count per league so admin can verify SDIO odds wrote correctly
+  // even before prediction sync runs.
+  const { data: oddsRows } = await supabaseAdmin
+    .from('cached_odds')
+    .select('league')
+  const cachedOddsByLeague: Record<string, number> = {}
+  for (const row of (oddsRows ?? [])) {
+    const lg = (row as Record<string, unknown>).league as string
+    cachedOddsByLeague[lg] = (cachedOddsByLeague[lg] ?? 0) + 1
+  }
+  const cachedOddsTotal = (oddsRows ?? []).length
 
   return {
     step: 'refresh_slate',
     success: true,
-    durationMs: 0,
+    durationMs: Date.now() - start,
     detail: {
       slateStart,
       slateEnd,
       gamesInSlate: count,
       gameIds,
-      note: 'Slate filter is applied at query time — no DB changes required.',
+      cachedOddsTotal,
+      cachedOddsByLeague,
+      note: 'Slate filter reads prediction_cache at query time. cachedOddsTotal shows current cached_odds rows.',
     },
   }
 }
