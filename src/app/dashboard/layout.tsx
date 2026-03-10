@@ -33,6 +33,7 @@ const navItems = [
 
 const ncaabNavItems = [
   { href: '/dashboard/bracket-lab', label: 'Bracket Lab', icon: FlaskConical, badge: 'NEW' },
+  { href: '/dashboard/official-survivor', label: 'Official Survivor', icon: Trophy },
 ]
 
 const adminNavItems = [

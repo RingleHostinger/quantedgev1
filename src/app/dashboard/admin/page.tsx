@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Shield, Users, Target, Plus, Brain, CheckCircle, Gift, TrendingUp, Activity, Eye, EyeOff, Newspaper, AlertTriangle, ToggleLeft, ToggleRight, FlaskConical, Trash2, Star, Zap, RefreshCw, Database, Clock, BarChart3, Play, CheckSquare, Calendar, Trophy, Filter } from 'lucide-react'
+import { Shield, Users, Target, Plus, Brain, CheckCircle, Gift, TrendingUp, Activity, Eye, EyeOff, Newspaper, AlertTriangle, ToggleLeft, ToggleRight, FlaskConical, Trash2, Star, Zap, RefreshCw, Database, Clock, BarChart3, Play, CheckSquare, Calendar, Trophy, Filter, DollarSign, Ticket, Crown, Medal, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -39,7 +39,7 @@ interface User {
   created_at: string
 }
 
-type Tab = 'overview' | 'games' | 'predictions' | 'free-pick' | 'users' | 'visibility' | 'briefing' | 'injuries-admin' | 'overrides' | 'bracket-model' | 'bracket-mgmt' | 'pipeline' | 'grading' | 'survivor-test' | 'survivor-grading'
+type Tab = 'overview' | 'games' | 'predictions' | 'free-pick' | 'users' | 'visibility' | 'briefing' | 'injuries-admin' | 'overrides' | 'bracket-model' | 'bracket-mgmt' | 'pipeline' | 'grading' | 'survivor-test' | 'survivor-grading' | 'official-contest'
 
 interface PipelineStatus {
   lastOddsRefresh: string | null
@@ -173,7 +173,6 @@ export default function AdminPage() {
     opponent_name: string | null
     win_probability: number | null
     result: string
-    created_at: string
     updated_at: string
     survivor_pools: { pool_name: string; pool_size: string; strike_rule: string; pick_format: string } | null
     users: { email: string; name: string } | null
@@ -587,6 +586,7 @@ export default function AdminPage() {
     { id: 'bracket-mgmt', label: 'Bracket Mgmt', icon: Star },
     { id: 'survivor-test', label: 'Survivor Test', icon: FlaskConical },
     { id: 'survivor-grading', label: 'Survivor Grading', icon: Trophy },
+    { id: 'official-contest', label: 'Official Contest', icon: DollarSign },
     { id: 'users', label: 'Users', icon: Users },
   ]
 
@@ -2090,6 +2090,11 @@ export default function AdminPage() {
             </div>
           )}
 
+          {/* Official Contest */}
+          {activeTab === 'official-contest' && (
+            <OfficialContestTab />
+          )}
+
           {/* Survivor Test Mode */}
           {activeTab === 'survivor-test' && (
             <div className="space-y-5">
@@ -2188,6 +2193,199 @@ export default function AdminPage() {
               </div>
             </div>
           )}
+        </>
+      )}
+    </div>
+  )
+}
+
+// ─── Official Contest Admin Tab ────────────────────────────────────────────
+
+interface ContestEntry {
+  id: string
+  userId: string
+  displayName: string
+  email: string
+  entryNumber: number
+  lsOrderId: string
+  lsOrderRef: string | null
+  amountPaidCents: number
+  status: 'active' | 'refunded'
+  entryStatus: 'alive' | 'eliminated'
+  picksCorrect: number
+  createdAt: string
+}
+
+interface ContestPrizePool {
+  totalEntries: number
+  entryPriceCents: number
+  totalPotCents: number
+  firstPlaceCents: number
+  secondPlaceCents: number
+  retainedCents: number
+  perfectSurvivorPotCents: number
+}
+
+interface ContestData {
+  pool: { id: string; pool_name: string; is_active: boolean }
+  prizePool: ContestPrizePool
+  aliveCount: number
+  eliminatedCount: number
+  totalEntries: number
+  activeEntries: number
+  entryList: ContestEntry[]
+}
+
+function fmtUSD(cents: number) {
+  return `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 0 })}`
+}
+
+function OfficialContestTab() {
+  const [data, setData] = useState<ContestData | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/admin/official-contest')
+      if (!res.ok) {
+        const body = await res.json()
+        setError(body.error ?? 'Failed to load')
+      } else {
+        setData(await res.json())
+      }
+    } catch {
+      setError('Network error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-lg font-bold text-white">Official Contest</h2>
+          <p className="text-sm mt-0.5" style={{ color: '#A0A0B0' }}>
+            Entry counts, prize pool, and participant list for the QuantEdge Official Survivor contest.
+          </p>
+        </div>
+        <button
+          onClick={load}
+          disabled={loading}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all hover:opacity-80"
+          style={{ background: 'rgba(255,255,255,0.07)', color: '#A0A0B0', border: '1px solid rgba(255,255,255,0.1)' }}
+        >
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          {loading ? 'Loading...' : 'Load Data'}
+        </button>
+      </div>
+
+      {error && (
+        <div className="p-3 rounded-xl text-sm" style={{ background: 'rgba(255,107,107,0.1)', color: '#FF6B6B', border: '1px solid rgba(255,107,107,0.2)' }}>
+          {error}
+        </div>
+      )}
+
+      {!data && !loading && !error && (
+        <div className="glass-card rounded-2xl p-10 text-center">
+          <DollarSign className="w-10 h-10 mx-auto mb-3" style={{ color: '#6B6B80' }} />
+          <p className="text-sm font-medium" style={{ color: '#A0A0B0' }}>Click &quot;Load Data&quot; to fetch contest stats.</p>
+        </div>
+      )}
+
+      {data && (
+        <>
+          {/* Stats row */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { label: 'Total Entries', value: String(data.totalEntries), color: '#00FFA3' },
+              { label: 'Prize Pool', value: fmtUSD(data.prizePool.totalPotCents), color: '#F59E0B' },
+              { label: 'Alive', value: String(data.aliveCount), color: '#00FFA3' },
+              { label: 'Eliminated', value: String(data.eliminatedCount), color: '#F87171' },
+            ].map((s) => (
+              <div key={s.label} className="glass-card rounded-xl p-4 text-center">
+                <div className="text-xl font-black" style={{ color: s.color }}>{s.value}</div>
+                <div className="text-xs mt-0.5" style={{ color: '#6B6B80' }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Prize breakdown */}
+          <div className="glass-card rounded-2xl p-5">
+            <h3 className="text-sm font-bold mb-4" style={{ color: '#E6E6FA' }}>Prize Breakdown</h3>
+            <div className="space-y-2">
+              {[
+                { label: 'Perfect Survivor (100%)', value: fmtUSD(data.prizePool.perfectSurvivorPotCents), color: '#FFD700' },
+                { label: '1st Place (50%)', value: fmtUSD(data.prizePool.firstPlaceCents), color: '#E6E6FA' },
+                { label: '2nd Place (25%)', value: fmtUSD(data.prizePool.secondPlaceCents), color: '#E6E6FA' },
+                { label: 'QuantEdge Retained (25%)', value: fmtUSD(data.prizePool.retainedCents), color: '#6B6B80' },
+              ].map((row) => (
+                <div key={row.label} className="flex items-center justify-between py-1.5 border-b" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+                  <span className="text-xs" style={{ color: '#A0A0B0' }}>{row.label}</span>
+                  <span className="text-xs font-bold" style={{ color: row.color }}>{row.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Entry list */}
+          <div className="glass-card rounded-2xl overflow-hidden">
+            <div className="p-4 border-b flex items-center justify-between" style={{ borderColor: 'rgba(255,255,255,0.07)' }}>
+              <h3 className="text-sm font-semibold" style={{ color: '#E6E6FA' }}>
+                Entry List — {data.totalEntries} total
+              </h3>
+            </div>
+
+            {data.entryList.length === 0 ? (
+              <div className="p-10 text-center">
+                <Ticket className="w-8 h-8 mx-auto mb-2" style={{ color: '#4A4A60' }} />
+                <p className="text-sm" style={{ color: '#6B6B80' }}>No entries yet.</p>
+              </div>
+            ) : (
+              <div className="divide-y" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+                {data.entryList.map((entry) => (
+                  <div key={entry.id} className="p-4 flex items-start justify-between gap-4 flex-wrap">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                        <span className="text-sm font-semibold" style={{ color: '#E6E6FA' }}>{entry.displayName}</span>
+                        <span className="text-xs px-1.5 py-0.5 rounded font-bold"
+                          style={{ background: 'rgba(255,255,255,0.07)', color: '#A0A0B0' }}>
+                          Entry #{entry.entryNumber}
+                        </span>
+                        {entry.entryStatus === 'alive'
+                          ? <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(0,255,163,0.1)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.2)' }}>Alive</span>
+                          : <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.1)', color: '#F87171', border: '1px solid rgba(239,68,68,0.2)' }}>Out</span>
+                        }
+                        {entry.status === 'refunded' && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(245,158,11,0.1)', color: '#F59E0B', border: '1px solid rgba(245,158,11,0.2)' }}>Refunded</span>
+                        )}
+                      </div>
+                      <div className="text-xs" style={{ color: '#6B6B80' }}>{entry.email}</div>
+                      {entry.lsOrderId && (
+                        <div className="text-[10px] mt-0.5 font-mono" style={{ color: '#4A4A60' }}>
+                          LS Order: {entry.lsOrderId}{entry.lsOrderRef ? ` (${entry.lsOrderRef})` : ''}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex gap-4 text-right flex-shrink-0">
+                      <div>
+                        <div className="text-sm font-bold" style={{ color: '#E6E6FA' }}>{entry.picksCorrect}</div>
+                        <div className="text-[10px]" style={{ color: '#6B6B80' }}>Correct</div>
+                      </div>
+                      <div>
+                        <div className="text-sm font-bold" style={{ color: '#00FFA3' }}>{fmtUSD(entry.amountPaidCents)}</div>
+                        <div className="text-[10px]" style={{ color: '#6B6B80' }}>Paid</div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </>
       )}
     </div>

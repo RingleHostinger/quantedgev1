@@ -53,12 +53,11 @@ export async function GET(req: NextRequest) {
       opponent_name,
       win_probability,
       result,
-      created_at,
       updated_at,
       survivor_pools ( pool_name, pool_size, strike_rule, pick_format ),
       users ( email, name )
     `)
-    .order('created_at', { ascending: false })
+    .order('updated_at', { ascending: false })
     .limit(200)
 
   if (resultFilter !== 'all') {
