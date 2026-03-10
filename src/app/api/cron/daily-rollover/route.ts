@@ -5,11 +5,12 @@
  * Schedule: 0 7 * * *
  *
  * Responsibilities (daily at 2 AM EST):
- *   1. Fetch final scores for any overnight games that finished late
+ *   1. Fetch final scores from SportsDataIO for overnight games (TheOddsAPI PAUSED)
  *   2. Final grading pass — grade all picks with now-final scores
  *   3. Archive previous slate (getTodaySlateRange shifts automatically at 2 AM ET)
  *   4. Load new day's official picks from fresh prediction_cache
- *   5. Log run to engine_runs
+ *   5. Refresh season schedules from SportsDataIO (NBA, NHL, MLB, NCAAB) [ENRICHMENT]
+ *   6. Log run to engine_runs
  *
  * Note: Ongoing hourly odds refresh, CLV capture, score fetching, and pick grading
  * run via /api/cron/odds-refresh (0 * * * *). This job handles daily rollover only.
@@ -21,12 +22,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { supabaseAdmin } from '@/integrations/supabase/server'
-import { fetchAndUpdateGameScores } from '@/lib/oddsCacheService'
+// TheOddsAPI — PAUSED. Import retained for potential future restoration.
+// import { fetchAndUpdateGameScores } from '@/lib/oddsCacheService'
 import {
   resolveOfficialPickResults,
   replaceOfficialPicksForDay,
 } from '@/lib/officialPicksService'
 import { getTodaySlateRange } from '@/lib/slateUtils'
+import { cacheSchedules, isSdioConfigured, updateGameScoresFromSdio } from '@/lib/sportsDataIOService'
 
 async function isAuthorized(req: NextRequest): Promise<boolean> {
   const session = await getSession()
@@ -59,15 +62,18 @@ export async function POST(req: NextRequest) {
   const runAt = new Date().toISOString()
   console.log('[daily-rollover] Starting daily rollover at', runAt)
 
-  // ── Step 1: Fetch final scores for late-finishing games ───────────────────
+  // ── Step 1: Fetch final scores from SportsDataIO ──────────────────────────
+  // TheOddsAPI fetchAndUpdateGameScores() is PAUSED — using SDIO equivalent.
   // Run before grading so picks from overnight games can be resolved.
   let scoresResult: { updated: number; errors: string[] } = { updated: 0, errors: [] }
-  try {
-    scoresResult = await fetchAndUpdateGameScores()
-    console.log('[daily-rollover] Scores updated:', scoresResult)
-  } catch (err) {
-    console.warn('[daily-rollover] Score fetch error:', err)
-    scoresResult = { updated: 0, errors: [String(err)] }
+  if (isSdioConfigured()) {
+    try {
+      scoresResult = await updateGameScoresFromSdio()
+      console.log('[daily-rollover] SDIO scores updated:', scoresResult)
+    } catch (err) {
+      console.warn('[daily-rollover] SDIO score fetch error:', err)
+      scoresResult = { updated: 0, errors: [String(err)] }
+    }
   }
 
   // ── Step 2: Final grading pass ─────────────────────────────────────────────
@@ -98,7 +104,23 @@ export async function POST(req: NextRequest) {
     picksResult = { inserted: 0, skipped: 0, errors: [String(err)] }
   }
 
-  // ── Step 5: Log run ────────────────────────────────────────────────────────
+  // ── Step 5: Refresh season schedules from SportsDataIO ────────────────────
+  // Runs daily so new games, postponements, and final scores are kept current.
+  // Non-blocking — schedule cache failure does not affect picks or grading.
+  let schedulesResult: { cached: number; errors: string[]; leagues: string[] } = {
+    cached: 0, errors: [], leagues: [],
+  }
+  if (isSdioConfigured()) {
+    try {
+      schedulesResult = await cacheSchedules()
+      console.log('[daily-rollover] Schedules cached:', schedulesResult.cached, 'leagues:', schedulesResult.leagues.join(', '))
+    } catch (err) {
+      console.warn('[daily-rollover] Schedule cache error:', err)
+      schedulesResult = { cached: 0, errors: [String(err)], leagues: [] }
+    }
+  }
+
+  // ── Step 6: Log run ────────────────────────────────────────────────────────
   const durationMs = Date.now() - startMs
   try {
     await supabaseAdmin.from('engine_runs').insert({
@@ -112,6 +134,8 @@ export async function POST(req: NextRequest) {
         picksGraded: gradingResult.resolved,
         newPicksInserted: picksResult.inserted,
         newPicksSkipped: picksResult.skipped,
+        schedulesCached: schedulesResult.cached,
+        schedulesLeagues: schedulesResult.leagues,
       }),
     })
   } catch (logErr) {
@@ -127,6 +151,7 @@ export async function POST(req: NextRequest) {
     scores: scoresResult,
     grading: gradingResult,
     picks: picksResult,
+    schedules: schedulesResult,
   })
 }
 

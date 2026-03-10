@@ -387,7 +387,7 @@ export async function syncOddsToGamesAndPredictions(): Promise<SyncResult> {
       status: errors.length === 0 ? 'completed' : 'partial',
       error_message: errors.length > 0 ? JSON.stringify(errors.slice(0, 5)) : null,
       engine_version: ENGINE_VERSION,
-      data_sources: { provider: 'TheOddsAPI', real_api_connected: true },
+      data_sources: { provider: 'SportsDataIO', real_api_connected: true },
     })
   } catch {
     // Log failure is non-critical

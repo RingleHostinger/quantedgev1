@@ -65,6 +65,9 @@ export async function GET() {
   const modelUpdatedAt = lastRun?.run_at ?? null
 
   // ─── Load splits from cached_betting_splits table ────────────────────────────
+  // cached_betting_splits uses SDIO game_ids ("sdio_xxxxx") while prediction_cache
+  // uses TheOddsAPI UUIDs — they never match directly.
+  // Join key: league + home_team + away_team (both sources use full team names from SDIO).
   type SplitEntry = ReturnType<typeof analyzeBettingSplit> & {
     spreadHomeBeats: number | null
     spreadAwayBets: number | null
@@ -75,6 +78,7 @@ export async function GET() {
     openingTotal: number | null
     currentTotal: number | null
   }
+  // Key: "{league}|{homeTeam}|{awayTeam}" (lowercased for resilience)
   let splitsMap = new Map<string, SplitEntry>()
 
   const { data: splitsRows } = await supabaseAdmin
@@ -91,6 +95,7 @@ export async function GET() {
       for (const r of splitsRows) {
         const split: SdioBettingSplit = {
           gameId:          r.game_id,
+          sdioGameId:      r.sdio_game_id ?? 0,
           league:          r.league,
           homeTeam:        r.home_team,
           awayTeam:        r.away_team,
@@ -110,7 +115,7 @@ export async function GET() {
           currentTotal:    r.current_total,
         }
         const analysis = analyzeBettingSplit(split)
-        splitsMap.set(r.game_id, {
+        const entry: SplitEntry = {
           ...analysis,
           spreadHomeBeats:  split.spreadHomeBeats,
           spreadAwayBets:   split.spreadAwayBets,
@@ -120,7 +125,10 @@ export async function GET() {
           currentSpread:    split.currentSpread,
           openingTotal:     split.openingTotal,
           currentTotal:     split.currentTotal,
-        })
+        }
+        // Index by league+home+away (lowercased) for fuzzy matching across providers
+        const key = `${(r.league as string).toLowerCase()}|${(r.home_team as string).toLowerCase()}|${(r.away_team as string).toLowerCase()}`
+        splitsMap.set(key, entry)
       }
     }
   }
@@ -143,7 +151,13 @@ export async function GET() {
         const impactScore = Number(inj.impact_score ?? 0)
         if (impactScore < 6) continue
         const status = inj.status as string
-        if (status !== 'Out' && status !== 'IR' && status !== 'Day-To-Day') continue
+        if (
+          status !== 'Out' &&
+          status !== 'IR' &&
+          status !== 'Doubtful' &&
+          status !== 'Day-To-Day' &&
+          status !== 'GTD'
+        ) continue
         const key = ((inj.team_name ?? inj.team) as string).toLowerCase()
         if (!injuryMap.has(key)) injuryMap.set(key, [])
         injuryMap.get(key)!.push({
@@ -157,7 +171,8 @@ export async function GET() {
 
   // ─── Build enriched heatmap rows ─────────────────────────────────────────────
   const heatmap = qualified.map((row) => {
-    const splits = splitsMap.get(row.game_id) ?? null
+    const splitsKey = `${(row.league ?? '').toLowerCase()}|${(row.home_team ?? '').toLowerCase()}|${(row.away_team ?? '').toLowerCase()}`
+    const splits = splitsMap.get(splitsKey) ?? null
 
     const homeKey = (row.home_team ?? '').toLowerCase()
     const awayKey = (row.away_team ?? '').toLowerCase()

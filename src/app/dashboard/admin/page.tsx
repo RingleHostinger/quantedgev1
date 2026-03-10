@@ -729,9 +729,16 @@ export default function AdminPage() {
                     {
                       action: 'refresh_odds',
                       label: 'Refresh Odds Now',
-                      description: 'Fetch latest odds from The Odds API and update cached_odds table',
+                      description: 'Fetch latest odds from SportsDataIO (GameOddsByDate) and update cached_odds table',
                       icon: Database,
                       color: '#3B82F6',
+                    },
+                    {
+                      action: 'refresh_scores',
+                      label: 'Refresh Final Scores Now',
+                      description: 'Fetch completed game scores from SportsDataIO and update games table for grading',
+                      icon: Trophy,
+                      color: '#22C55E',
                     },
                     {
                       action: 'run_predictions',
@@ -781,6 +788,13 @@ export default function AdminPage() {
                       description: 'Fetch today\'s public betting splits from SportsDataIO and update cached_betting_splits table',
                       icon: BarChart3,
                       color: '#8B5CF6',
+                    },
+                    {
+                      action: 'refresh_schedules',
+                      label: 'Refresh Season Schedules',
+                      description: 'Fetch full season schedules for NBA, NHL, MLB, NCAAB from SportsDataIO and update cached_schedules table',
+                      icon: Calendar,
+                      color: '#06B6D4',
                     },
                   ].map(({ action, label, description, icon: Icon, color }) => (
                     <button

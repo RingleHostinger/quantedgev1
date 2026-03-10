@@ -6,16 +6,16 @@
  *
  * Responsibilities (every hour):
  *   1. Capture closing line value (CLV) for picks near tip-off
- *   2. Refresh sportsbook odds via TheOddsAPI → cached_odds   [CORE]
- *   3. Sync cached_odds → games + predictions + official picks [CORE]
- *   4. Fetch final scores via TheOddsAPI → games table         [CORE]
- *   5. Cache injuries + betting splits via SportsDataIO        [ENRICHMENT]
- *   6. Grade pending official picks with final scores          [CORE]
+ *   2. Refresh sportsbook odds via SportsDataIO → cached_odds   [CORE]
+ *   3. Sync cached_odds → games + predictions + official picks   [CORE]
+ *   4. Fetch final scores via SportsDataIO → games table         [CORE]
+ *   5. Cache injuries + betting splits via SportsDataIO          [ENRICHMENT]
+ *   6. Grade pending official picks with final scores            [CORE]
  *   7. Log run to engine_runs
  *
  * Data sources:
- *   - TheOddsAPI  → steps 2, 3, 4 (odds, schedule, scores, picks)
- *   - SportsDataIO → step 5 only (injuries, betting splits enrichment)
+ *   - SportsDataIO → all steps (odds, scores, injuries, betting splits)
+ *   - TheOddsAPI   → PAUSED (code retained; not called)
  *
  * Security: Requires either a valid admin session OR the CRON_SECRET header/bearer token.
  * Vercel Cron sends: Authorization: Bearer <CRON_SECRET>
@@ -24,10 +24,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { supabaseAdmin } from '@/integrations/supabase/server'
-import { refreshOddsCache, fetchAndUpdateGameScores } from '@/lib/oddsCacheService'
+// TheOddsAPI — PAUSED. Imports retained for potential future restoration.
+// import { refreshOddsCache, fetchAndUpdateGameScores } from '@/lib/oddsCacheService'
 import { syncOddsToGamesAndPredictions } from '@/lib/oddsSyncService'
 import { resolveOfficialPickResults, updateClosingLines } from '@/lib/officialPicksService'
-import { cacheInjuries, cacheBettingSplits, isSdioConfigured } from '@/lib/sportsDataIOService'
+import {
+  cacheInjuries,
+  cacheBettingSplits,
+  isSdioConfigured,
+  refreshOddsCacheFromSdio,
+  updateGameScoresFromSdio,
+} from '@/lib/sportsDataIOService'
 
 async function isAuthorized(req: NextRequest): Promise<boolean> {
   const session = await getSession()
@@ -71,23 +78,28 @@ export async function POST(req: NextRequest) {
     clvResult = { updated: 0, errors: [String(err)] }
   }
 
-  // ── Step 2: Refresh odds from The Odds API ────────────────────────────────
-  let oddsResult: Awaited<ReturnType<typeof refreshOddsCache>> | { success: false; error: string; errors?: string[] } = {
+  // ── Step 2: Refresh odds from SportsDataIO ───────────────────────────────
+  // TheOddsAPI is PAUSED — refreshOddsCache() is not called.
+  let oddsResult: Awaited<ReturnType<typeof refreshOddsCacheFromSdio>> | { success: false; error: string; errors?: string[] } = {
     success: false,
     error: 'Not attempted',
   }
-  try {
-    oddsResult = await refreshOddsCache()
-    if (oddsResult.success) {
-      console.log('[cron/odds-refresh] Odds refreshed — success. Sports:', (oddsResult as Awaited<ReturnType<typeof refreshOddsCache>>).sportsRefreshed?.join(', '))
-    } else {
-      const errs = (oddsResult as { errors?: string[] }).errors ?? []
-      console.warn('[cron/odds-refresh] Odds refresh returned success=false. Errors:', errs.join(' | '))
+  if (isSdioConfigured()) {
+    try {
+      oddsResult = await refreshOddsCacheFromSdio()
+      if (oddsResult.success) {
+        console.log('[cron/odds-refresh] SDIO odds refreshed — leagues:', (oddsResult as Awaited<ReturnType<typeof refreshOddsCacheFromSdio>>).leaguesRefreshed?.join(', '))
+      } else {
+        const errs = (oddsResult as { errors?: string[] }).errors ?? []
+        console.warn('[cron/odds-refresh] SDIO odds refresh returned success=false. Errors:', errs.join(' | '))
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error('[cron/odds-refresh] SDIO odds refresh threw:', msg)
+      oddsResult = { success: false, error: msg }
     }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.error('[cron/odds-refresh] Odds refresh threw:', msg)
-    oddsResult = { success: false, error: msg }
+  } else {
+    oddsResult = { success: false, error: 'SPORTSDATAIO_API_KEY not configured', errors: [] }
   }
 
   // ── Step 3: Sync odds → games + recalculate predictions ──────────────────
@@ -104,14 +116,17 @@ export async function POST(req: NextRequest) {
     syncResult = { error: msg }
   }
 
-  // ── Step 4: Fetch final scores for completed games ────────────────────────
+  // ── Step 4: Fetch final scores from SportsDataIO ─────────────────────────
+  // TheOddsAPI fetchAndUpdateGameScores() is PAUSED — using SDIO equivalent.
   let scoresResult: { updated: number; errors: string[] } = { updated: 0, errors: [] }
-  try {
-    scoresResult = await fetchAndUpdateGameScores()
-    console.log('[cron/odds-refresh] Scores updated:', scoresResult)
-  } catch (err) {
-    console.warn('[cron/odds-refresh] Score fetch error:', err)
-    scoresResult = { updated: 0, errors: [String(err)] }
+  if (isSdioConfigured()) {
+    try {
+      scoresResult = await updateGameScoresFromSdio()
+      console.log('[cron/odds-refresh] SDIO scores updated:', scoresResult)
+    } catch (err) {
+      console.warn('[cron/odds-refresh] SDIO score fetch error:', err)
+      scoresResult = { updated: 0, errors: [String(err)] }
+    }
   }
 
   // ── Step 5a: Cache injuries from SportsDataIO ─────────────────────────────
@@ -159,7 +174,7 @@ export async function POST(req: NextRequest) {
         picksGraded: gradingResult.resolved,
         oddsSuccess: oddsResult.success,
         oddsErrors: (oddsResult as { errors?: string[] }).errors?.slice(0, 3) ?? [],
-        sportsRefreshed: (oddsResult as { sportsRefreshed?: string[] }).sportsRefreshed ?? [],
+        leaguesRefreshed: (oddsResult as { leaguesRefreshed?: string[] }).leaguesRefreshed ?? [],
         syncErrors: syncResult && 'error' in syncResult ? [(syncResult as { error: string }).error] : [],
         injuriesCached: injuriesResult.cached,
         splitsCached: splitsResult.cached,

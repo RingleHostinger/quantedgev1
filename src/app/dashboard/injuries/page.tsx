@@ -341,6 +341,12 @@ export default function InjuriesPage() {
               </span>
             )}
           </p>
+          {/* Feed limitation notice */}
+          <div className="mt-2 flex items-center gap-1.5">
+            <span className="text-xs" style={{ color: '#6B6B80' }}>
+              Injury classifications expanding soon as additional data feeds are enabled.
+            </span>
+          </div>
         </div>
         <button
           onClick={loadInjuries}
@@ -355,21 +361,47 @@ export default function InjuriesPage() {
 
       {/* Summary stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          { label: 'Out / IR',      count: outCount,          color: '#FF6B6B', bg: 'rgba(255,107,107,0.08)' },
-          { label: 'Questionable',  count: questionableCount, color: '#F59E0B', bg: 'rgba(245,158,11,0.08)'  },
-          { label: 'Probable',      count: probableCount,     color: '#00FFA3', bg: 'rgba(0,255,163,0.08)'   },
-          { label: 'High-Impact Out', count: criticalCount,   color: '#F97316', bg: 'rgba(249,115,22,0.08)'  },
-        ].map(({ label, count, color, bg }) => (
-          <div
-            key={label}
-            className="rounded-2xl p-4 text-center"
-            style={{ background: bg, border: `1px solid ${color}25` }}
-          >
-            <div className="text-3xl font-black" style={{ color }}>{count}</div>
-            <div className="text-xs font-semibold mt-1 uppercase tracking-wider" style={{ color }}>{label}</div>
+        {/* Out / IR — coming soon */}
+        <div
+          className="rounded-2xl p-4 text-center"
+          style={{ background: 'rgba(255,107,107,0.05)', border: '1px solid rgba(255,107,107,0.15)' }}
+        >
+          <div className="text-xs font-bold px-2 py-0.5 rounded-full inline-block mb-1" style={{ background: 'rgba(255,107,107,0.12)', color: '#FF6B6B', border: '1px solid rgba(255,107,107,0.2)' }}>
+            Coming Soon
           </div>
-        ))}
+          <div className="text-xs font-semibold uppercase tracking-wider mt-1" style={{ color: '#FF6B6B' }}>Out / IR</div>
+        </div>
+
+        {/* Questionable — live */}
+        <div
+          className="rounded-2xl p-4 text-center"
+          style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }}
+        >
+          <div className="text-3xl font-black" style={{ color: '#F59E0B' }}>{questionableCount}</div>
+          <div className="text-xs font-semibold mt-1 uppercase tracking-wider" style={{ color: '#F59E0B' }}>Questionable</div>
+        </div>
+
+        {/* Probable — coming soon */}
+        <div
+          className="rounded-2xl p-4 text-center"
+          style={{ background: 'rgba(0,255,163,0.05)', border: '1px solid rgba(0,255,163,0.12)' }}
+        >
+          <div className="text-xs font-bold px-2 py-0.5 rounded-full inline-block mb-1" style={{ background: 'rgba(0,255,163,0.10)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.2)' }}>
+            Coming Soon
+          </div>
+          <div className="text-xs font-semibold uppercase tracking-wider mt-1" style={{ color: '#00FFA3' }}>Probable</div>
+        </div>
+
+        {/* High-Impact Out — coming soon */}
+        <div
+          className="rounded-2xl p-4 text-center"
+          style={{ background: 'rgba(249,115,22,0.05)', border: '1px solid rgba(249,115,22,0.15)' }}
+        >
+          <div className="text-xs font-bold px-2 py-0.5 rounded-full inline-block mb-1" style={{ background: 'rgba(249,115,22,0.10)', color: '#F97316', border: '1px solid rgba(249,115,22,0.2)' }}>
+            Coming Soon
+          </div>
+          <div className="text-xs font-semibold uppercase tracking-wider mt-1" style={{ color: '#F97316' }}>High-Impact Out</div>
+        </div>
       </div>
 
       {/* Filters */}
@@ -393,10 +425,10 @@ export default function InjuriesPage() {
           ))}
         </div>
 
-        {/* Status filter */}
+        {/* Status filter — Out/Probable disabled until full injury feed is active */}
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#6B6B80' }}>Status:</span>
-          {['All', 'Out', 'Questionable', 'Probable'].map((s) => (
+          {['All', 'Questionable'].map((s) => (
             <button
               key={s}
               onClick={() => setStatusFilter(s)}
@@ -409,6 +441,21 @@ export default function InjuriesPage() {
             >
               {s}
             </button>
+          ))}
+          {['Out', 'Probable'].map((s) => (
+            <span
+              key={s}
+              className="text-xs font-bold px-3 py-1 rounded-full"
+              style={{
+                background: 'rgba(255,255,255,0.02)',
+                color: '#3A3A50',
+                border: '1px solid rgba(255,255,255,0.05)',
+                cursor: 'not-allowed',
+              }}
+              title="Expanding soon as additional data feeds are enabled"
+            >
+              {s}
+            </span>
           ))}
         </div>
       </div>

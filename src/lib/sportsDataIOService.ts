@@ -13,6 +13,8 @@
  *                        /v3/cbb/scores/json/InjuredPlayers        (CBB)
  *   BettingSplitsByGameId: /v3/{league}/odds/json/BettingSplitsByGameId/{gameId}
  *                          (NBA, NHL, CBB — same path pattern, confirmed)
+ *   Season schedule:     /v3/{league}/scores/json/Games/{season}
+ *                        (NBA, NHL, MLB, CBB — confirmed from docs screenshots)
  *
  * Auth: query param ?key={API_KEY}
  *
@@ -53,16 +55,19 @@ function getSdioApiKey(): string | undefined {
 // ─── League config ─────────────────────────────────────────────────────────────
 
 interface LeagueConfig {
-  sdioKey: string          // URL segment: nba | nhl | cbb
-  league: string           // our internal label: NBA | NHL | NCAAB
-  sport: string            // our internal label: Basketball | Hockey
+  sdioKey: string          // URL segment used in most endpoints: nba | nhl | mlb | cbb
+  league: string           // our internal label: NBA | NHL | MLB | NCAAB
+  sport: string            // our internal label: Basketball | Hockey | Baseball
   injuryPath: string       // base path for InjuredPlayers endpoint (differs by league)
+  hasInjuryFeed: boolean   // whether InjuredPlayers endpoint is available for this league
+  hasBettingSplits: boolean // whether BettingSplitsByGameId is available
 }
 
 const SDIO_LEAGUES: LeagueConfig[] = [
-  { sdioKey: 'nba', league: 'NBA',   sport: 'Basketball', injuryPath: 'projections' },
-  { sdioKey: 'nhl', league: 'NHL',   sport: 'Hockey',     injuryPath: 'projections' },
-  { sdioKey: 'cbb', league: 'NCAAB', sport: 'Basketball', injuryPath: 'scores'      },
+  { sdioKey: 'nba', league: 'NBA',   sport: 'Basketball', injuryPath: 'projections', hasInjuryFeed: true,  hasBettingSplits: true  },
+  { sdioKey: 'nhl', league: 'NHL',   sport: 'Hockey',     injuryPath: 'projections', hasInjuryFeed: true,  hasBettingSplits: true  },
+  { sdioKey: 'cbb', league: 'NCAAB', sport: 'Basketball', injuryPath: 'scores',      hasInjuryFeed: true,  hasBettingSplits: true  },
+  { sdioKey: 'mlb', league: 'MLB',   sport: 'Baseball',   injuryPath: 'projections', hasInjuryFeed: false, hasBettingSplits: false },
 ]
 
 // ─── SportsDataIO response types ───────────────────────────────────────────────
@@ -459,6 +464,60 @@ export async function fetchSdioScores(): Promise<{
   return { scores, errors }
 }
 
+/**
+ * Fetch final scores from SportsDataIO and update the games table.
+ * Drop-in replacement for oddsCacheService.fetchAndUpdateGameScores().
+ *
+ * Reads games from the games table matched by odds_game_id ("sdio_xxxxx"),
+ * updates actual_home_score, actual_away_score, and status = 'final'.
+ */
+export async function updateGameScoresFromSdio(): Promise<{ updated: number; errors: string[] }> {
+  const { scores, errors } = await fetchSdioScores()
+  if (!scores.length) return { updated: 0, errors }
+
+  // Build lookup: sdio game_id → scores
+  const scoreMap = new Map<string, { home: number; away: number }>()
+  for (const s of scores) {
+    scoreMap.set(s.game_id, { home: s.homeScore, away: s.awayScore })
+  }
+
+  // Find matching games rows by odds_game_id (which holds "sdio_xxxxx" strings)
+  const { data: dbGames, error: fetchErr } = await supabaseAdmin
+    .from('games')
+    .select('id, odds_game_id, status')
+    .in('odds_game_id', Array.from(scoreMap.keys()))
+
+  if (fetchErr || !dbGames) {
+    errors.push(`Failed to fetch games for score update: ${fetchErr?.message}`)
+    return { updated: 0, errors }
+  }
+
+  let updated = 0
+  for (const game of dbGames) {
+    if (game.status === 'final') continue // already graded
+    const sc = scoreMap.get(game.odds_game_id as string)
+    if (!sc) continue
+
+    const { error: updateErr } = await supabaseAdmin
+      .from('games')
+      .update({
+        actual_home_score: sc.home,
+        actual_away_score: sc.away,
+        status: 'final',
+      })
+      .eq('id', game.id)
+
+    if (updateErr) {
+      errors.push(`game ${game.id}: ${updateErr.message}`)
+    } else {
+      updated++
+    }
+  }
+
+  console.info(`[sportsDataIOService] updateGameScoresFromSdio: ${updated} games updated`)
+  return { updated, errors }
+}
+
 // ─── Injury feed ────────────────────────────────────────────────────────────────
 
 export interface SdioInjuryPlayer {
@@ -470,7 +529,7 @@ export interface SdioInjuryPlayer {
   position:        string | null
   injuryType:      string           // body part
   injuryDesc:      string           // description
-  status:          'Out' | 'Questionable' | 'Probable' | 'Day-To-Day' | 'IR' | 'GTD'
+  status:          'Out' | 'Doubtful' | 'Questionable' | 'Probable' | 'Day-To-Day' | 'IR' | 'GTD'
   expectedReturn:  string | null    // ISO date string or null
   impactScore:     number           // 0–10 estimated from FantasyPoints
   updatedAt:       string           // ISO timestamp
@@ -497,12 +556,43 @@ interface SDIORawInjury {
 
 function normalizeSdioStatus(raw: string | undefined): SdioInjuryPlayer['status'] {
   if (!raw) return 'Questionable'
-  const s = raw.toLowerCase()
-  if (s === 'out' || s === 'did not participate' || s === 'dnp') return 'Out'
-  if (s === 'ir' || s === 'injured reserve' || s === 'suspended') return 'IR'
-  if (s === 'probable' || s === 'full practice' || s === 'full participation') return 'Probable'
-  if (s === 'day-to-day' || s === 'dtd') return 'Day-To-Day'
-  if (s === 'gtd' || s === 'game time decision') return 'GTD'
+  const s = raw.toLowerCase().trim()
+
+  // "Scrambled" = status obfuscated by SDIO when injury feed tier is not enabled.
+  // Treat as Questionable until the full feed is active.
+  if (s === 'scrambled') return 'Questionable'
+
+  // OUT / IR bucket — most severe
+  if (s === 'out' || s === 'dnp' || s === 'did not participate') return 'Out'
+  if (
+    s === 'ir' ||
+    s === 'injured reserve' ||
+    s.includes('injured reserve') ||
+    s === 'suspended' ||
+    s.includes('suspend')
+  ) return 'IR'
+
+  // Doubtful — maps to Out/IR display per UI spec
+  if (s === 'doubtful' || s.includes('doubtful')) return 'Doubtful'
+
+  // Probable
+  if (
+    s === 'probable' ||
+    s === 'full practice' ||
+    s === 'full participation' ||
+    s.includes('probable')
+  ) return 'Probable'
+
+  // Active — treat as Probable (healthy player on injured list for tracking)
+  if (s === 'active') return 'Probable'
+
+  // GTD / Game Time Decision
+  if (s === 'gtd' || s === 'game time decision' || s.includes('game time')) return 'GTD'
+
+  // Day-To-Day
+  if (s === 'day-to-day' || s === 'dtd' || s.includes('day-to-day')) return 'Day-To-Day'
+
+  // Questionable — catch-all including explicit "Questionable"
   return 'Questionable'
 }
 
@@ -574,7 +664,7 @@ export async function fetchAllInjuries(): Promise<{
   const configuredLeagues = SDIO_LEAGUES
 
   await Promise.allSettled(
-    configuredLeagues.map(async (config) => {
+    configuredLeagues.filter((c) => c.hasInjuryFeed).map(async (config) => {
       try {
         const players = await fetchInjuriesForLeague(config, apiKey)
         all.push(...players)
@@ -601,6 +691,7 @@ export async function fetchAllInjuries(): Promise<{
 
 export interface SdioBettingSplit {
   gameId:        string   // our sdio_ prefixed game ID
+  sdioGameId:    number   // raw SDIO integer GameId (for joining to cached_schedules)
   league:        string
   homeTeam:      string
   awayTeam:      string
@@ -718,6 +809,7 @@ function parseGameBettingSplit(
 
   return {
     gameId:          buildGameId(game.GameId),
+    sdioGameId:      game.GameId,
     league,
     homeTeam,
     awayTeam,
@@ -801,7 +893,7 @@ export async function fetchBettingSplits(): Promise<{
   }
 
   await Promise.allSettled(
-    SDIO_LEAGUES.map(async (config) => {
+    SDIO_LEAGUES.filter((c) => c.hasBettingSplits).map(async (config) => {
       try {
         const { splits, errors } = await fetchBettingSplitsForLeague(config, apiKey)
         all.push(...splits)
@@ -996,6 +1088,7 @@ export async function cacheBettingSplits(): Promise<CacheBettingSplitsResult> {
 
   const rows = splits.map((s) => ({
     game_id:           s.gameId,
+    sdio_game_id:      s.sdioGameId,
     league:            s.league,
     home_team:         s.homeTeam,
     away_team:         s.awayTeam,
@@ -1102,5 +1195,294 @@ export function analyzeBettingSplit(split: SdioBettingSplit): {
     lineMovementDesc,
     totalMovementAlert,
     totalMovementDesc,
+  }
+}
+
+// ─── Season schedule feed ────────────────────────────────────────────────────────
+//
+// Confirmed endpoints (from docs screenshots):
+//   NBA:  /v3/nba/scores/json/Games/{season}   — "Schedules"
+//   NHL:  /v3/nhl/scores/json/Games/{season}   — "Schedules"
+//   MLB:  /v3/mlb/scores/json/Games/{season}   — "Schedules"
+//   CBB:  /v3/cbb/scores/json/Games/{season}   — "Games - by Season"
+//
+// All use: GET /v3/{league}/scores/json/Games/{YYYY}?key={apiKey}
+// Return type: Game[] with full schedule for the season.
+// Refreshed daily (not hourly) — season metadata is static; status/scores update via GamesByDate.
+
+interface SDIOSeasonGame {
+  GameId:             number
+  DateTime?:          string | null   // "2026-03-09T19:30:00"
+  Date?:              string | null   // date-only fallback: "2026-03-09"
+  Status?:            string | null   // "Scheduled" | "Final" | "InProgress" | "Postponed" | "Canceled"
+  SeasonType?:        number | null   // 1=Regular, 2=Preseason, 3=Postseason, 4=Tournament
+  Season?:            number | null
+  HomeTeam?:          string | null   // abbreviation
+  AwayTeam?:          string | null
+  HomeTeamName?:      string | null   // full name
+  AwayTeamName?:      string | null
+  HomeTeamID?:        number | null
+  AwayTeamID?:        number | null
+  HomeTeamScore?:     number | null
+  AwayTeamScore?:     number | null
+  Stadium?:           { Name?: string | null; City?: string | null } | null
+  StadiumID?:         number | null
+  NeutralVenue?:      boolean | null
+  Channel?:           string | null   // broadcast e.g. "ESPN"
+  PointSpread?:       number | null   // pre-game line from schedule feed
+  OverUnder?:         number | null
+}
+
+/**
+ * Map SDIO SeasonType integer to a human-readable label.
+ */
+function sdioSeasonTypeLabel(typeId: number | null | undefined): string {
+  switch (typeId) {
+    case 1: return 'Regular Season'
+    case 2: return 'Preseason'
+    case 3: return 'Playoffs'
+    case 4: return 'Tournament'
+    default: return 'Regular Season'
+  }
+}
+
+/**
+ * Derive the current season string for a given league.
+ * NBA/NHL/CBB: season year = the calendar year the season *ends* in.
+ *   e.g. 2025-26 NBA season → "2026"
+ * MLB: season year = the calendar year the season runs in.
+ *   e.g. 2026 MLB season → "2026"
+ */
+function getCurrentSeason(league: string): string {
+  const now = new Date()
+  const year = now.getUTCFullYear()
+  const month = now.getUTCMonth() + 1 // 1-12
+
+  if (league === 'MLB') {
+    // MLB regular season runs April–October; use current year
+    return String(year)
+  }
+
+  // NBA/NHL: season crosses calendar years (Oct–Jun)
+  // If we're in Aug/Sep/Oct onward, the season ending year = year+1
+  // If Jan–Jul, the season ending year = current year
+  if (month >= 8) return String(year + 1)
+  return String(year)
+}
+
+/**
+ * Fetch the full season schedule for one league from SDIO.
+ * Endpoint: /v3/{league}/scores/json/Games/{season}
+ */
+async function fetchSeasonScheduleForLeague(
+  config: LeagueConfig,
+  apiKey: string,
+): Promise<{ games: SDIOSeasonGame[]; errors: string[] }> {
+  const season = getCurrentSeason(config.league)
+  const url = `${SDIO_BASE}/${config.sdioKey}/scores/json/Games/${season}?key=${apiKey}`
+
+  try {
+    const data = await sdioFetch(url)
+    const games = Array.isArray(data) ? data as SDIOSeasonGame[] : []
+    console.info(`[sportsDataIOService] schedule ${config.league} ${season}: ${games.length} games`)
+    return { games, errors: [] }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error(`[sportsDataIOService] schedule ${config.league} FAILED:`, msg)
+    return { games: [], errors: [`${config.league}: ${msg}`] }
+  }
+}
+
+export interface CachedScheduleRow {
+  game_id:       string       // "sdio_{GameId}"
+  sdio_game_id:  number
+  league:        string
+  sport:         string
+  home_team:     string
+  away_team:     string
+  home_team_id:  number | null
+  away_team_id:  number | null
+  game_date:     string       // "YYYY-MM-DD"
+  commence_time: string | null
+  status:        string
+  season:        string
+  season_type:   string
+  venue:         string | null
+  neutral_venue: boolean
+  broadcast:     string | null
+  home_score:    number | null
+  away_score:    number | null
+  last_updated:  string
+}
+
+function normalizeScheduleStatus(raw: string | null | undefined): string {
+  if (!raw) return 'Scheduled'
+  const s = raw.toLowerCase()
+  if (s === 'final' || s === 'f' || s === 'f/ot') return 'Final'
+  if (s === 'inprogress' || s === 'in progress' || s === 'live') return 'InProgress'
+  if (s === 'postponed') return 'Postponed'
+  if (s === 'canceled' || s === 'cancelled') return 'Canceled'
+  return 'Scheduled'
+}
+
+function buildScheduleRow(
+  game: SDIOSeasonGame,
+  config: LeagueConfig,
+  season: string,
+  now: string,
+): CachedScheduleRow {
+  const homeTeam = game.HomeTeamName ?? game.HomeTeam ?? ''
+  const awayTeam = game.AwayTeamName ?? game.AwayTeam ?? ''
+
+  // Parse datetime — SDIO returns without timezone, treat as ET (UTC-5 winter / UTC-4 summer)
+  // Store as-is with Z for downstream consistency (same as GamesByDate handling)
+  const rawDt = game.DateTime ?? game.Date ?? null
+  const commenceTime = rawDt
+    ? (rawDt.endsWith('Z') ? rawDt : `${rawDt}Z`)
+    : null
+
+  // Extract date portion
+  const gameDate = rawDt
+    ? rawDt.slice(0, 10)   // "YYYY-MM-DD"
+    : ''
+
+  // Venue: SDIO returns a nested Stadium object
+  const venue = game.Stadium?.Name
+    ? (game.Stadium.City ? `${game.Stadium.Name}, ${game.Stadium.City}` : game.Stadium.Name)
+    : null
+
+  return {
+    game_id:       buildGameId(game.GameId),
+    sdio_game_id:  game.GameId,
+    league:        config.league,
+    sport:         config.sport,
+    home_team:     homeTeam,
+    away_team:     awayTeam,
+    home_team_id:  game.HomeTeamID ?? null,
+    away_team_id:  game.AwayTeamID ?? null,
+    game_date:     gameDate,
+    commence_time: commenceTime,
+    status:        normalizeScheduleStatus(game.Status),
+    season,
+    season_type:   sdioSeasonTypeLabel(game.SeasonType),
+    venue,
+    neutral_venue: game.NeutralVenue ?? false,
+    broadcast:     game.Channel ?? null,
+    home_score:    game.HomeTeamScore ?? null,
+    away_score:    game.AwayTeamScore ?? null,
+    last_updated:  now,
+  }
+}
+
+export interface CacheSchedulesResult {
+  cached:   number
+  errors:   string[]
+  cachedAt: string
+  leagues:  string[]
+}
+
+/**
+ * Fetch the full season schedule for NBA, NHL, MLB, and NCAAB from SportsDataIO
+ * and write them to the cached_schedules table.
+ *
+ * Strategy: upsert on (sdio_game_id, league) so:
+ *   - New games are inserted
+ *   - Existing games get status + score updates
+ *   - No orphan rows accumulate
+ *
+ * Called daily (not hourly) from the daily-rollover cron.
+ */
+export async function cacheSchedules(): Promise<CacheSchedulesResult> {
+  const errors: string[] = []
+  const cachedAt = new Date().toISOString()
+  const leaguesCached: string[] = []
+  let totalCached = 0
+
+  const apiKey = getSdioApiKey()
+  if (!apiKey) {
+    return { cached: 0, errors: ['No SPORTSDATAIO_API_KEY env var configured'], cachedAt, leagues: [] }
+  }
+
+  await Promise.allSettled(
+    SDIO_LEAGUES.map(async (config) => {
+      const season = getCurrentSeason(config.league)
+      const { games, errors: fetchErrors } = await fetchSeasonScheduleForLeague(config, apiKey)
+      errors.push(...fetchErrors)
+
+      if (!games.length) return
+
+      // Filter out games with no GameId or date (data quality guard)
+      const validGames = games.filter((g) => g.GameId && (g.DateTime || g.Date))
+      const rows = validGames.map((g) => buildScheduleRow(g, config, season, cachedAt))
+
+      if (!rows.length) return
+
+      // Upsert in batches of 200 to avoid payload limits
+      const BATCH = 200
+      for (let i = 0; i < rows.length; i += BATCH) {
+        const batch = rows.slice(i, i + BATCH)
+        const { error } = await supabaseAdmin
+          .from('cached_schedules')
+          .upsert(batch, { onConflict: 'sdio_game_id,league' })
+
+        if (error) {
+          errors.push(`${config.league} batch ${i / BATCH + 1}: ${error.message}`)
+          console.error(`[sportsDataIOService] cacheSchedules ${config.league} upsert error:`, error.message)
+        } else {
+          totalCached += batch.length
+        }
+      }
+
+      leaguesCached.push(config.league)
+      console.info(`[sportsDataIOService] cacheSchedules ${config.league}: ${rows.length} rows upserted`)
+    })
+  )
+
+  return { cached: totalCached, errors, cachedAt, leagues: leaguesCached }
+}
+
+/**
+ * Query today's scheduled games from cached_schedules.
+ * Returns games for a given date (UTC) across all leagues (or filtered by league).
+ */
+export async function getScheduledGamesForDate(
+  date: string,   // "YYYY-MM-DD"
+  league?: string,
+): Promise<CachedScheduleRow[]> {
+  let query = supabaseAdmin
+    .from('cached_schedules')
+    .select('*')
+    .eq('game_date', date)
+    .not('status', 'in', '("Canceled","Postponed")')
+    .order('commence_time', { ascending: true })
+
+  if (league) query = query.eq('league', league)
+
+  const { data, error } = await query
+  if (error) {
+    console.error('[sportsDataIOService] getScheduledGamesForDate error:', error.message)
+    return []
+  }
+  return (data ?? []) as CachedScheduleRow[]
+}
+
+/**
+ * Look up a game's final status and scores from cached_schedules by SDIO game_id.
+ * Used by the grading system to verify Final status via SDIO's own GameId.
+ */
+export async function getScheduleGameStatus(
+  sdioGameId: number,
+): Promise<{ status: string; homeScore: number | null; awayScore: number | null } | null> {
+  const { data, error } = await supabaseAdmin
+    .from('cached_schedules')
+    .select('status, home_score, away_score')
+    .eq('sdio_game_id', sdioGameId)
+    .single()
+
+  if (error || !data) return null
+  return {
+    status:     data.status as string,
+    homeScore:  data.home_score as number | null,
+    awayScore:  data.away_score as number | null,
   }
 }
