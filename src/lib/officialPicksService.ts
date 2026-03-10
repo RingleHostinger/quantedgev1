@@ -15,6 +15,7 @@
 
 import { supabaseAdmin } from '@/integrations/supabase/server'
 import { spreadPickSide } from '@/lib/spreadPickUtils'
+import { getTodaySlateRange } from '@/lib/slateUtils'
 
 export interface OfficialPicksResult {
   inserted: number
@@ -84,17 +85,25 @@ function determinePickSide(
 /**
  * Select and insert the top 5 official AI picks for today from prediction_cache.
  * Only inserts new picks — does not overwrite existing records.
+ *
+ * Uses the EST sports day window (2 AM ET → 2 AM ET next day) so picks only
+ * come from the current day's slate — never from adjacent calendar dates.
  */
 export async function selectAndInsertOfficialPicks(): Promise<OfficialPicksResult> {
   const errors: string[] = []
   let inserted = 0
   let skipped = 0
 
-  // Fetch top 10 from prediction_cache (we'll take 5 after deduplication)
-  // Only include upcoming games (commence_time in the future or within last 2h)
-  const cutoff = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+  // Use the current EST sports day window — NOT a rolling 2-hour cutoff.
+  // This guarantees picks only come from today's slate regardless of when this runs.
+  const { start: slateStart, end: slateEnd } = getTodaySlateRange()
 
-  const { data: rows, error } = await supabaseAdmin
+  console.info(`[officialPicksService] Selecting picks for slate window: ${slateStart} → ${slateEnd}`)
+
+  // Fetch top 10 from prediction_cache within the slate window
+  // nubase drops .lt() upper bound when combined with .gte(), so query with .lt() only
+  // and JS-filter for the lower bound (same pattern as filterToWindow in slateUtils).
+  const { data: allRows, error } = await supabaseAdmin
     .from('prediction_cache')
     .select(`
       id, game_id, league, home_team, away_team, commence_time,
@@ -103,9 +112,15 @@ export async function selectAndInsertOfficialPicks(): Promise<OfficialPicksResul
       spread_edge, total_edge,
       confidence_score, edge_score
     `)
-    .gte('commence_time', cutoff)
+    .lt('commence_time', slateEnd)
     .order('edge_score', { ascending: false })
-    .limit(10)
+    .limit(50) // fetch more since we JS-filter below
+
+  // JS-filter lower bound (workaround for nubase .gte + .lt bug)
+  const slateStartMs = new Date(slateStart).getTime()
+  const rows = (allRows ?? []).filter(
+    (r) => r.commence_time != null && new Date(r.commence_time).getTime() >= slateStartMs
+  ).slice(0, 10)
 
   if (error || !rows) {
     return { inserted: 0, skipped: 0, errors: [`Failed to read prediction_cache: ${error?.message}`] }

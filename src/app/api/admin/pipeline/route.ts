@@ -41,7 +41,7 @@ import { syncOddsToGamesAndPredictions } from '@/lib/oddsSyncService'
 import {
   resolveOfficialPickResults,
   updateClosingLines,
-  selectAndInsertOfficialPicks,
+  replaceOfficialPicksForDay,
 } from '@/lib/officialPicksService'
 import { getTodaySlateGameIds, getTodaySlateRange, filterToWindow } from '@/lib/slateUtils'
 
@@ -229,10 +229,11 @@ export async function POST(req: NextRequest) {
 
     if (action === 'select_picks') {
       const start = Date.now()
-      const result = await selectAndInsertOfficialPicks()
+      const { start: slateStart, end: slateEnd } = getTodaySlateRange()
+      const result = await replaceOfficialPicksForDay(slateStart, slateEnd)
       return NextResponse.json({
         success: result.errors.length === 0,
-        results: [{ step: 'select_picks', ...result, durationMs: Date.now() - start }],
+        results: [{ step: 'select_picks', ...result, durationMs: Date.now() - start, detail: { slateStart, slateEnd } }],
         totalDurationMs: Date.now() - totalStart,
       })
     }

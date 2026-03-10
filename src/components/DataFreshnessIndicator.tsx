@@ -10,9 +10,6 @@ interface DataStatus {
   gamesInSlate: number
   slateStart: string
   slateEnd: string
-  nextRefreshInMinutes: number | null
-  injuriesUpdatedAt: string | null
-  bettingSplitsUpdatedAt: string | null
 }
 
 const POLL_INTERVAL_MS = 3 * 60 * 1000 // re-fetch every 3 minutes
@@ -218,55 +215,6 @@ export function DataFreshnessIndicator() {
           stale={status.lastPickGradeAt == null}
           tick={tick}
         />
-
-        {/* Injuries Cache */}
-        {status.injuriesUpdatedAt !== undefined && (
-          <>
-            <div style={{ height: 1, background: 'rgba(255,255,255,0.05)' }} />
-            <StatusRow
-              label="Injuries Cached"
-              time={status.injuriesUpdatedAt}
-              age={status.injuriesUpdatedAt}
-              stale={
-                status.injuriesUpdatedAt == null ||
-                (Date.now() - new Date(status.injuriesUpdatedAt).getTime()) > 90 * 60 * 1000
-              }
-              tick={tick}
-            />
-          </>
-        )}
-
-        {/* Betting Splits Cache */}
-        {status.bettingSplitsUpdatedAt !== undefined && (
-          <>
-            <div style={{ height: 1, background: 'rgba(255,255,255,0.05)' }} />
-            <StatusRow
-              label="Splits Cached"
-              time={status.bettingSplitsUpdatedAt}
-              age={status.bettingSplitsUpdatedAt}
-              stale={
-                status.bettingSplitsUpdatedAt == null ||
-                (Date.now() - new Date(status.bettingSplitsUpdatedAt).getTime()) > 60 * 60 * 1000
-              }
-              tick={tick}
-            />
-          </>
-        )}
-
-        {/* Next refresh */}
-        {status.nextRefreshInMinutes != null && (
-          <>
-            <div style={{ height: 1, background: 'rgba(255,255,255,0.05)' }} />
-            <div className="flex items-center justify-between">
-              <span className="text-[11px]" style={{ color: '#6B6B80' }}>Next Odds Refresh</span>
-              <span className="text-[11px] font-semibold" style={{ color: '#A0A0B0' }}>
-                {status.nextRefreshInMinutes === 0
-                  ? 'Any moment'
-                  : `~${status.nextRefreshInMinutes}m`}
-              </span>
-            </div>
-          </>
-        )}
       </div>
     </div>
   )
