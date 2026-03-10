@@ -631,8 +631,11 @@ export default function AdminPage() {
             <div className="space-y-5">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-lg font-bold text-white">Pipeline Control</h2>
-                  <p className="text-sm mt-0.5" style={{ color: '#A0A0B0' }}>Manually trigger data pipeline steps — simulates production cron jobs</p>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-lg font-bold text-white">Pipeline Control</h2>
+                    <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'rgba(0,255,163,0.12)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.25)' }}>TheOddsAPI</span>
+                  </div>
+                  <p className="text-sm mt-0.5" style={{ color: '#A0A0B0' }}>Manually trigger live pipeline steps — powered by TheOddsAPI</p>
                 </div>
                 <button
                   onClick={() => { loadPipelineStatus(); setActiveTab('pipeline') }}
@@ -719,82 +722,64 @@ export default function AdminPage() {
                 </div>
               )}
 
-              {/* Action Buttons */}
+              {/* Active Pipeline Actions */}
               <div className="space-y-3">
-                <h3 className="text-sm font-semibold" style={{ color: '#E6E6FA' }}>Manual Actions</h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold" style={{ color: '#E6E6FA' }}>Live Pipeline Actions</h3>
+                  <span className="text-xs" style={{ color: '#6B6B80' }}>Source: TheOddsAPI</span>
+                </div>
 
-                {/* Individual steps */}
+                {/* Individual active steps */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {[
                     {
                       action: 'refresh_odds',
-                      label: 'Refresh Odds Now',
-                      description: 'Fetch latest odds from SportsDataIO (GameOddsByDate) and update cached_odds table',
+                      label: 'Refresh Odds',
+                      description: 'Fetch latest odds from TheOddsAPI → write to cached_odds',
                       icon: Database,
                       color: '#3B82F6',
                     },
                     {
                       action: 'refresh_scores',
-                      label: 'Refresh Final Scores Now',
-                      description: 'Fetch completed game scores from SportsDataIO and update games table for grading',
+                      label: 'Refresh Final Scores',
+                      description: 'Fetch completed game scores from TheOddsAPI → update games table',
                       icon: Trophy,
                       color: '#22C55E',
                     },
                     {
+                      action: 'refresh_slate',
+                      label: 'Refresh Active Slate',
+                      description: 'Confirm today\'s EST game window and cached_odds row count',
+                      icon: Calendar,
+                      color: '#F59E0B',
+                    },
+                    {
                       action: 'run_predictions',
-                      label: 'Regenerate Predictions Now',
-                      description: 'Sync odds into games table and run the prediction engine',
+                      label: 'Regenerate Predictions',
+                      description: 'Sync cached odds → run prediction engine → update prediction_cache',
                       icon: Brain,
                       color: '#A78BFA',
                     },
                     {
-                      action: 'recalculate_edges',
-                      label: 'Recalculate Edges Now',
-                      description: 'Re-score edge values and update prediction_cache rankings',
-                      icon: BarChart3,
-                      color: '#00FFA3',
-                    },
-                    {
-                      action: 'refresh_slate',
-                      label: 'Refresh Active Slate Now',
-                      description: 'Show current EST sports day window and game count (filter is always live)',
-                      icon: Calendar,
-                      color: '#F59E0B',
-                    },
-                    {
-                      action: 'grade_picks',
-                      label: 'Grade Official Picks Now',
-                      description: 'Resolve results for completed games and update model performance stats',
-                      icon: CheckSquare,
-                      color: '#10B981',
-                    },
-                    {
                       action: 'select_picks',
-                      label: 'Select Official Picks Now',
-                      description: 'Choose top 5 picks from today\'s slate and write to official_picks table',
+                      label: 'Select Official Picks',
+                      description: 'Choose top picks from today\'s slate → write to official_picks',
                       icon: Star,
                       color: '#F59E0B',
                     },
                     {
-                      action: 'refresh_injuries',
-                      label: 'Refresh Injuries Cache',
-                      description: 'Fetch latest injury report from SportsDataIO and update cached_injuries table',
-                      icon: Database,
-                      color: '#F97316',
+                      action: 'grade_picks',
+                      label: 'Grade Official Picks',
+                      description: 'Resolve results for completed games → update model performance stats',
+                      icon: CheckSquare,
+                      color: '#10B981',
                     },
                     {
-                      action: 'refresh_betting_splits',
-                      label: 'Refresh Betting Splits Cache',
-                      description: 'Fetch today\'s public betting splits from SportsDataIO and update cached_betting_splits table',
+                      action: 'recalculate_edges',
+                      label: 'Recalculate Edges',
+                      description: 'Re-score edge values → update prediction_cache rankings',
                       icon: BarChart3,
-                      color: '#8B5CF6',
-                    },
-                    {
-                      action: 'refresh_schedules',
-                      label: 'Refresh Season Schedules',
-                      description: 'Fetch full season schedules for NBA, NHL, MLB, NCAAB from SportsDataIO and update cached_schedules table',
-                      icon: Calendar,
-                      color: '#06B6D4',
+                      color: '#00FFA3',
                     },
                   ].map(({ action, label, description, icon: Icon, color }) => (
                     <button
@@ -838,14 +823,42 @@ export default function AdminPage() {
                     </div>
                     <div>
                       <div className="text-base font-bold" style={{ color: '#00FFA3' }}>
-                        {pipelineRunning === 'full_cycle' ? 'Running Full Daily Cycle...' : 'Run Full Daily Cycle Now'}
+                        {pipelineRunning === 'full_cycle' ? 'Running Full Daily Cycle...' : 'Run Full Daily Cycle'}
                       </div>
                       <div className="text-sm mt-0.5" style={{ color: '#A0A0B0' }}>
-                        Refresh odds → Regenerate predictions → Confirm slate → Grade picks — all in one click
+                        Refresh odds → Refresh scores → Predictions → Select picks → Grade picks (TheOddsAPI only)
                       </div>
                     </div>
                   </div>
                 </button>
+              </div>
+
+              {/* Coming Soon — features requiring additional data providers */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#6B6B80' }}>Coming Soon</h3>
+                  <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.06)' }} />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {[
+                    { label: 'Injuries Cache', description: 'Player injury reports & impact scores', icon: Database },
+                    { label: 'Betting Splits', description: 'Public bets %, public money %, sharp alerts', icon: BarChart3 },
+                    { label: 'Season Schedules', description: 'Full season schedule sync for all leagues', icon: Calendar },
+                  ].map(({ label, description, icon: Icon }) => (
+                    <div
+                      key={label}
+                      className="p-3 rounded-xl"
+                      style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)' }}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <Icon className="w-3.5 h-3.5" style={{ color: '#6B6B80' }} />
+                        <span className="text-xs font-medium" style={{ color: '#6B6B80' }}>{label}</span>
+                        <span className="ml-auto text-xs px-1.5 py-0.5 rounded" style={{ background: 'rgba(255,255,255,0.05)', color: '#6B6B80' }}>Soon</span>
+                      </div>
+                      <div className="text-xs" style={{ color: '#4A4A5A' }}>{description}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
 
               {/* Results */}
@@ -915,19 +928,19 @@ export default function AdminPage() {
                             )}
                             {r.step === 'refresh_odds' && r.detail && (() => {
                               const d = r.detail as Record<string, unknown>
-                              // SdioRefreshResult uses leaguesRefreshed (not sportsRefreshed)
-                              const leagues = Array.isArray(d.leaguesRefreshed) ? (d.leaguesRefreshed as string[]) : []
+                              // TheOddsAPI RefreshResult uses sportsRefreshed (not leaguesRefreshed)
+                              const sports = Array.isArray(d.sportsRefreshed) ? (d.sportsRefreshed as string[]) : []
                               const errors = Array.isArray(d.errors) ? (d.errors as string[]) : []
-                              const hasSdioKey = !d.error || !(d.error as string).includes('not configured')
+                              const hasApiKey = !errors.some((e) => typeof e === 'string' && e.includes('ODDS_API_KEY'))
                               return (
                                 <>
-                                  <div style={{ color: !hasSdioKey ? '#FF6B6B' : undefined }}>
-                                    SportsDataIO Key: {!hasSdioKey ? 'MISSING' : 'OK'}
+                                  <div style={{ color: !hasApiKey ? '#FF6B6B' : undefined }}>
+                                    TheOddsAPI Key: {!hasApiKey ? 'MISSING' : 'OK'}
                                   </div>
                                   <div>Fetched: {String(d.totalFetched ?? 0)} games</div>
                                   <div>Updated: {String(d.totalUpserted ?? 0)} records</div>
-                                  {leagues.length > 0 && (
-                                    <div>Leagues: {leagues.join(', ')}</div>
+                                  {sports.length > 0 && (
+                                    <div>Sports: {sports.join(', ')}</div>
                                   )}
                                   {d.refreshedAt && (
                                     <div>At: {new Date(String(d.refreshedAt)).toLocaleTimeString()}</div>
@@ -950,56 +963,11 @@ export default function AdminPage() {
                                 </>
                               )
                             })()}
-                            {r.step === 'refresh_injuries' && r.detail && (() => {
-                              const d = r.detail as Record<string, unknown>
-                              const errors = Array.isArray(d.errors) ? (d.errors as string[]) : []
-                              return (
-                                <>
-                                  <div>Cached: {String(d.cached ?? 0)} players</div>
-                                  {d.cachedAt && <div>At: {new Date(String(d.cachedAt)).toLocaleTimeString()}</div>}
-                                  {errors.length > 0 && (
-                                    <div style={{ color: '#F59E0B' }}>Errors: {errors.join(' | ')}</div>
-                                  )}
-                                </>
-                              )
-                            })()}
-                            {r.step === 'refresh_betting_splits' && r.detail && (() => {
-                              const d = r.detail as Record<string, unknown>
-                              const errors = Array.isArray(d.errors) ? (d.errors as string[]) : []
-                              const summary = (d.leagueSummary ?? {}) as Record<string, { gamesFound: number; splitsFetched: number }>
-                              const summaryLines = Object.entries(summary).map(
-                                ([lg, s]) => `${lg}: ${s.splitsFetched}/${s.gamesFound} games`
-                              )
-                              return (
-                                <>
-                                  <div>Cached: {String(d.cached ?? 0)} splits</div>
-                                  {summaryLines.length > 0 && (
-                                    <div>By league: {summaryLines.join(', ')}</div>
-                                  )}
-                                  {d.cachedAt && <div>At: {new Date(String(d.cachedAt)).toLocaleTimeString()}</div>}
-                                  {errors.length > 0 && (
-                                    <div style={{ color: '#F59E0B' }}>
-                                      Errors ({errors.length}): {errors.slice(0, 3).join(' | ')}
-                                      {errors.length > 3 && ` … +${errors.length - 3} more`}
-                                    </div>
-                                  )}
-                                </>
-                              )
-                            })()}
-                            {r.step === 'refresh_schedules' && r.detail && (() => {
-                              const d = r.detail as Record<string, unknown>
-                              const errors = Array.isArray(d.errors) ? (d.errors as string[]) : []
-                              const leagues = Array.isArray(d.leagues) ? (d.leagues as string[]) : []
-                              return (
-                                <>
-                                  <div>Cached: {String(d.cached ?? 0)} games</div>
-                                  {leagues.length > 0 && <div>Leagues: {leagues.join(', ')}</div>}
-                                  {errors.length > 0 && (
-                                    <div style={{ color: '#F59E0B' }}>Errors: {errors.join(' | ')}</div>
-                                  )}
-                                </>
-                              )
-                            })()}
+                            {(r.step === 'refresh_injuries' || r.step === 'refresh_betting_splits' || r.step === 'refresh_schedules') && r.detail && (
+                              <div style={{ color: '#A0A0B0' }}>
+                                {String((r.detail as Record<string, unknown>).note ?? 'Coming Soon — SportsDataIO paused')}
+                              </div>
+                            )}
                             {r.step === 'select_picks' && r.detail && (
                               <div>Inserted: {String((r.detail as unknown as Record<string, number>).inserted ?? 0)}, Skipped: {String((r.detail as unknown as Record<string, number>).skipped ?? 0)}</div>
                             )}

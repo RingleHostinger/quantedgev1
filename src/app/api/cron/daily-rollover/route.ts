@@ -5,15 +5,18 @@
  * Schedule: 0 7 * * *
  *
  * Responsibilities (daily at 2 AM EST):
- *   1. Fetch final scores from SportsDataIO for overnight games (TheOddsAPI PAUSED)
+ *   1. Fetch final scores from TheOddsAPI for overnight games
  *   2. Final grading pass — grade all picks with now-final scores
  *   3. Archive previous slate (getTodaySlateRange shifts automatically at 2 AM ET)
  *   4. Load new day's official picks from fresh prediction_cache
- *   5. Refresh season schedules from SportsDataIO (NBA, NHL, MLB, NCAAB) [ENRICHMENT]
- *   6. Log run to engine_runs
+ *   5. Log run to engine_runs
  *
  * Note: Ongoing hourly odds refresh, CLV capture, score fetching, and pick grading
  * run via /api/cron/odds-refresh (0 * * * *). This job handles daily rollover only.
+ *
+ * Data sources:
+ *   - TheOddsAPI → all core steps (scores)
+ *   - SportsDataIO → PAUSED (code retained in sportsDataIOService.ts; not called)
  *
  * Security: Requires either a valid admin session OR the CRON_SECRET header/bearer token.
  * Vercel Cron sends: Authorization: Bearer <CRON_SECRET>
@@ -22,14 +25,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { supabaseAdmin } from '@/integrations/supabase/server'
-// TheOddsAPI — PAUSED. Import retained for potential future restoration.
-// import { fetchAndUpdateGameScores } from '@/lib/oddsCacheService'
+import {
+  fetchAndUpdateGameScores,
+  isOddsApiConfigured,
+} from '@/lib/oddsCacheService'
+// SportsDataIO — PAUSED. Imports retained for potential future restoration.
+// import { cacheSchedules, isSdioConfigured, updateGameScoresFromSdio } from '@/lib/sportsDataIOService'
 import {
   resolveOfficialPickResults,
   replaceOfficialPicksForDay,
 } from '@/lib/officialPicksService'
 import { getTodaySlateRange } from '@/lib/slateUtils'
-import { cacheSchedules, isSdioConfigured, updateGameScoresFromSdio } from '@/lib/sportsDataIOService'
 
 async function isAuthorized(req: NextRequest): Promise<boolean> {
   const session = await getSession()
@@ -62,19 +68,22 @@ export async function POST(req: NextRequest) {
   const runAt = new Date().toISOString()
   console.log('[daily-rollover] Starting daily rollover at', runAt)
 
-  // ── Step 1: Fetch final scores from SportsDataIO ──────────────────────────
-  // TheOddsAPI fetchAndUpdateGameScores() is PAUSED — using SDIO equivalent.
+  // ── Step 1: Fetch final scores from TheOddsAPI ────────────────────────────
   // Run before grading so picks from overnight games can be resolved.
   let scoresResult: { updated: number; errors: string[] } = { updated: 0, errors: [] }
-  if (isSdioConfigured()) {
+  if (isOddsApiConfigured()) {
     try {
-      scoresResult = await updateGameScoresFromSdio()
-      console.log('[daily-rollover] SDIO scores updated:', scoresResult)
+      scoresResult = await fetchAndUpdateGameScores()
+      console.log('[daily-rollover] Scores updated:', scoresResult)
     } catch (err) {
-      console.warn('[daily-rollover] SDIO score fetch error:', err)
+      console.warn('[daily-rollover] Score fetch error:', err)
       scoresResult = { updated: 0, errors: [String(err)] }
     }
   }
+
+  // SportsDataIO schedules — PAUSED
+  // Season schedule refresh is not run in this cron.
+  // Re-enable by restoring cacheSchedules() call here.
 
   // ── Step 2: Final grading pass ─────────────────────────────────────────────
   // Grade all pending picks that now have final scores.
@@ -104,23 +113,7 @@ export async function POST(req: NextRequest) {
     picksResult = { inserted: 0, skipped: 0, errors: [String(err)] }
   }
 
-  // ── Step 5: Refresh season schedules from SportsDataIO ────────────────────
-  // Runs daily so new games, postponements, and final scores are kept current.
-  // Non-blocking — schedule cache failure does not affect picks or grading.
-  let schedulesResult: { cached: number; errors: string[]; leagues: string[] } = {
-    cached: 0, errors: [], leagues: [],
-  }
-  if (isSdioConfigured()) {
-    try {
-      schedulesResult = await cacheSchedules()
-      console.log('[daily-rollover] Schedules cached:', schedulesResult.cached, 'leagues:', schedulesResult.leagues.join(', '))
-    } catch (err) {
-      console.warn('[daily-rollover] Schedule cache error:', err)
-      schedulesResult = { cached: 0, errors: [String(err)], leagues: [] }
-    }
-  }
-
-  // ── Step 6: Log run ────────────────────────────────────────────────────────
+  // ── Step 5: Log run ────────────────────────────────────────────────────────
   const durationMs = Date.now() - startMs
   try {
     await supabaseAdmin.from('engine_runs').insert({
@@ -134,8 +127,6 @@ export async function POST(req: NextRequest) {
         picksGraded: gradingResult.resolved,
         newPicksInserted: picksResult.inserted,
         newPicksSkipped: picksResult.skipped,
-        schedulesCached: schedulesResult.cached,
-        schedulesLeagues: schedulesResult.leagues,
       }),
     })
   } catch (logErr) {
@@ -151,7 +142,6 @@ export async function POST(req: NextRequest) {
     scores: scoresResult,
     grading: gradingResult,
     picks: picksResult,
-    schedules: schedulesResult,
   })
 }
 
@@ -175,7 +165,7 @@ export async function GET(req: NextRequest) {
       endpoint: '/api/cron/daily-rollover',
       schedule: '0 7 * * *',
       description: [
-        'Daily 2 AM EST: fetches overnight scores, grades pending picks,',
+        'Daily 2 AM EST: fetches overnight scores via TheOddsAPI, grades pending picks,',
         'then loads fresh official picks for the new sports day.',
       ].join(' '),
       pendingPicksToGrade: (pendingPicks ?? []).length,

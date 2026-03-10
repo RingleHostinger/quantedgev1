@@ -6,16 +6,15 @@
  *
  * Responsibilities (every hour):
  *   1. Capture closing line value (CLV) for picks near tip-off
- *   2. Refresh sportsbook odds via SportsDataIO → cached_odds   [CORE]
- *   3. Sync cached_odds → games + predictions + official picks   [CORE]
- *   4. Fetch final scores via SportsDataIO → games table         [CORE]
- *   5. Cache injuries + betting splits via SportsDataIO          [ENRICHMENT]
- *   6. Grade pending official picks with final scores            [CORE]
- *   7. Log run to engine_runs
+ *   2. Refresh sportsbook odds via TheOddsAPI → cached_odds   [CORE]
+ *   3. Sync cached_odds → games + predictions + official picks  [CORE]
+ *   4. Fetch final scores via TheOddsAPI → games table          [CORE]
+ *   5. Grade pending official picks with final scores           [CORE]
+ *   6. Log run to engine_runs
  *
  * Data sources:
- *   - SportsDataIO → all steps (odds, scores, injuries, betting splits)
- *   - TheOddsAPI   → PAUSED (code retained; not called)
+ *   - TheOddsAPI → all core steps (odds, scores)
+ *   - SportsDataIO → PAUSED (code retained in sportsDataIOService.ts; not called)
  *
  * Security: Requires either a valid admin session OR the CRON_SECRET header/bearer token.
  * Vercel Cron sends: Authorization: Bearer <CRON_SECRET>
@@ -24,17 +23,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { supabaseAdmin } from '@/integrations/supabase/server'
-// TheOddsAPI — PAUSED. Imports retained for potential future restoration.
-// import { refreshOddsCache, fetchAndUpdateGameScores } from '@/lib/oddsCacheService'
+import {
+  refreshOddsCache,
+  fetchAndUpdateGameScores,
+  isOddsApiConfigured,
+} from '@/lib/oddsCacheService'
+// SportsDataIO — PAUSED. Imports retained for potential future restoration.
+// import { cacheInjuries, cacheBettingSplits, isSdioConfigured, refreshOddsCacheFromSdio, updateGameScoresFromSdio } from '@/lib/sportsDataIOService'
 import { syncOddsToGamesAndPredictions } from '@/lib/oddsSyncService'
 import { resolveOfficialPickResults, updateClosingLines } from '@/lib/officialPicksService'
-import {
-  cacheInjuries,
-  cacheBettingSplits,
-  isSdioConfigured,
-  refreshOddsCacheFromSdio,
-  updateGameScoresFromSdio,
-} from '@/lib/sportsDataIOService'
 
 async function isAuthorized(req: NextRequest): Promise<boolean> {
   const session = await getSession()
@@ -78,34 +75,32 @@ export async function POST(req: NextRequest) {
     clvResult = { updated: 0, errors: [String(err)] }
   }
 
-  // ── Step 2: Refresh odds from SportsDataIO ───────────────────────────────
-  // TheOddsAPI is PAUSED — refreshOddsCache() is not called.
-  let oddsResult: Awaited<ReturnType<typeof refreshOddsCacheFromSdio>> | { success: false; error: string; errors?: string[] } = {
+  // ── Step 2: Refresh odds from TheOddsAPI ─────────────────────────────────
+  let oddsResult: Awaited<ReturnType<typeof refreshOddsCache>> | { success: false; error: string; errors?: string[] } = {
     success: false,
     error: 'Not attempted',
   }
-  if (isSdioConfigured()) {
+  if (isOddsApiConfigured()) {
     try {
-      oddsResult = await refreshOddsCacheFromSdio()
+      oddsResult = await refreshOddsCache()
       if (oddsResult.success) {
-        console.log('[cron/odds-refresh] SDIO odds refreshed — leagues:', (oddsResult as Awaited<ReturnType<typeof refreshOddsCacheFromSdio>>).leaguesRefreshed?.join(', '))
+        console.log('[cron/odds-refresh] TheOddsAPI odds refreshed — sports:', (oddsResult as Awaited<ReturnType<typeof refreshOddsCache>>).sportsRefreshed?.join(', '))
       } else {
         const errs = (oddsResult as { errors?: string[] }).errors ?? []
-        console.warn('[cron/odds-refresh] SDIO odds refresh returned success=false. Errors:', errs.join(' | '))
+        console.warn('[cron/odds-refresh] TheOddsAPI odds refresh returned success=false. Errors:', errs.join(' | '))
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      console.error('[cron/odds-refresh] SDIO odds refresh threw:', msg)
+      console.error('[cron/odds-refresh] TheOddsAPI odds refresh threw:', msg)
       oddsResult = { success: false, error: msg }
     }
   } else {
-    oddsResult = { success: false, error: 'SPORTSDATAIO_API_KEY not configured', errors: [] }
+    oddsResult = { success: false, error: 'ODDS_API_KEY not configured', errors: [] }
   }
 
   // ── Step 3: Sync odds → games + recalculate predictions ──────────────────
   // Always attempt sync even if odds refresh failed — the cache may still have
-  // valid data from a previous successful run, and syncing it ensures predictions
-  // and official picks stay up to date.
+  // valid data from a previous successful run.
   let syncResult: Awaited<ReturnType<typeof syncOddsToGamesAndPredictions>> | { error: string } | null = null
   try {
     syncResult = await syncOddsToGamesAndPredictions()
@@ -116,36 +111,23 @@ export async function POST(req: NextRequest) {
     syncResult = { error: msg }
   }
 
-  // ── Step 4: Fetch final scores from SportsDataIO ─────────────────────────
-  // TheOddsAPI fetchAndUpdateGameScores() is PAUSED — using SDIO equivalent.
+  // ── Step 4: Fetch final scores from TheOddsAPI ───────────────────────────
   let scoresResult: { updated: number; errors: string[] } = { updated: 0, errors: [] }
-  if (isSdioConfigured()) {
+  if (isOddsApiConfigured()) {
     try {
-      scoresResult = await updateGameScoresFromSdio()
-      console.log('[cron/odds-refresh] SDIO scores updated:', scoresResult)
+      scoresResult = await fetchAndUpdateGameScores()
+      console.log('[cron/odds-refresh] Scores updated:', scoresResult)
     } catch (err) {
-      console.warn('[cron/odds-refresh] SDIO score fetch error:', err)
+      console.warn('[cron/odds-refresh] Score fetch error:', err)
       scoresResult = { updated: 0, errors: [String(err)] }
     }
   }
 
-  // ── Step 5a: Cache injuries from SportsDataIO ─────────────────────────────
-  let injuriesResult: { cached: number; errors: string[]; cachedAt: string } = { cached: 0, errors: [], cachedAt: '' }
-  let splitsResult: { cached: number; errors: string[]; cachedAt: string } = { cached: 0, errors: [], cachedAt: '' }
-  if (isSdioConfigured()) {
-    try {
-      [injuriesResult, splitsResult] = await Promise.all([
-        cacheInjuries(),
-        cacheBettingSplits(),
-      ])
-      console.log('[cron/odds-refresh] Injuries cached:', injuriesResult.cached, '| Splits cached:', splitsResult.cached)
-    } catch (err) {
-      console.warn('[cron/odds-refresh] Injury/splits cache error:', err)
-    }
-  }
+  // SportsDataIO enrichment — PAUSED
+  // Injuries, betting splits, and schedules are not refreshed in this cron.
+  // Re-enable by restoring cacheInjuries() + cacheBettingSplits() calls here.
 
   // ── Step 5: Grade pending official picks ──────────────────────────────────
-  // Runs after score fetch so any newly-final games are immediately gradeable.
   let gradingResult: { resolved: number; errors: string[] } = { resolved: 0, errors: [] }
   try {
     gradingResult = await resolveOfficialPickResults()
@@ -174,10 +156,8 @@ export async function POST(req: NextRequest) {
         picksGraded: gradingResult.resolved,
         oddsSuccess: oddsResult.success,
         oddsErrors: (oddsResult as { errors?: string[] }).errors?.slice(0, 3) ?? [],
-        leaguesRefreshed: (oddsResult as { leaguesRefreshed?: string[] }).leaguesRefreshed ?? [],
+        sportsRefreshed: (oddsResult as { sportsRefreshed?: string[] }).sportsRefreshed ?? [],
         syncErrors: syncResult && 'error' in syncResult ? [(syncResult as { error: string }).error] : [],
-        injuriesCached: injuriesResult.cached,
-        splitsCached: splitsResult.cached,
       }),
     })
   } catch (logErr) {
@@ -217,7 +197,7 @@ export async function GET(req: NextRequest) {
       endpoint: '/api/cron/odds-refresh',
       schedule: '0 * * * *',
       description: [
-        'Hourly run: refreshes odds, recalculates predictions, captures CLV,',
+        'Hourly run: refreshes odds via TheOddsAPI, recalculates predictions, captures CLV,',
         'fetches final scores, and grades any newly-completed official picks.',
       ].join(' '),
       pendingPicksToGrade: (pendingPicks ?? []).length,

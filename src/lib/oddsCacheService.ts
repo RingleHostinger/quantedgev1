@@ -569,6 +569,14 @@ export async function fetchAndUpdateGameScores(): Promise<{
 }
 
 /**
+ * Returns true if the TheOddsAPI key is configured.
+ * Used by pipeline handlers to gate API calls (mirrors isSdioConfigured() in sportsDataIOService).
+ */
+export function isOddsApiConfigured(): boolean {
+  return !!(process.env.ODDS_API_KEY)
+}
+
+/**
  * Read cached odds from the database.
  * Optionally filter by sport, league, or a specific game_id.
  */

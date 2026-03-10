@@ -8,18 +8,20 @@
  * Body: { action: string }
  *
  * Actions:
- *   'refresh_odds'         — fetch fresh odds from SportsDataIO + update cached_odds
- *   'refresh_scores'       — fetch final scores from SportsDataIO + update games table
+ *   'refresh_odds'         — fetch fresh odds from TheOddsAPI + update cached_odds
+ *   'refresh_scores'       — fetch final scores from TheOddsAPI + update games table
  *   'run_predictions'      — run the prediction engine (sync cached_odds → prediction_cache)
  *   'recalculate_edges'    — re-run the sync that scores edges (same as run_predictions pipeline)
  *   'refresh_slate'        — no-op (slate filter is computed at query time from slateUtils)
  *   'grade_picks'          — resolve results for pending official picks with final scores
- *   'refresh_injuries'     — fetch injuries from SportsDataIO
- *   'refresh_betting_splits' — fetch public betting splits from SportsDataIO
- *   'refresh_schedules'    — fetch season schedules from SportsDataIO
- *   'full_cycle'           — runs all of the above in sequence
+ *   'refresh_injuries'     — COMING SOON (SportsDataIO paused)
+ *   'refresh_betting_splits' — COMING SOON (SportsDataIO paused)
+ *   'refresh_schedules'    — COMING SOON (SportsDataIO paused)
+ *   'full_cycle'           — runs all active steps in sequence
  *
- * TheOddsAPI: PAUSED — code retained but not called.
+ * Data sources:
+ *   - TheOddsAPI → all active steps (odds, scores)
+ *   - SportsDataIO → PAUSED (code retained in sportsDataIOService.ts; not called)
  *
  * GET /api/admin/pipeline
  *   Returns current pipeline status: last run times, pending picks count, etc.
@@ -28,8 +30,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { supabaseAdmin } from '@/integrations/supabase/server'
-// TheOddsAPI — PAUSED. Import retained for potential future restoration.
-// import { refreshOddsCache } from '@/lib/oddsCacheService'
+import {
+  refreshOddsCache,
+  fetchAndUpdateGameScores,
+  isOddsApiConfigured,
+} from '@/lib/oddsCacheService'
+// SportsDataIO — PAUSED. Imports retained for potential future restoration.
+// import { cacheInjuries, cacheBettingSplits, cacheSchedules, isSdioConfigured, refreshOddsCacheFromSdio, updateGameScoresFromSdio } from '@/lib/sportsDataIOService'
 import { syncOddsToGamesAndPredictions } from '@/lib/oddsSyncService'
 import {
   resolveOfficialPickResults,
@@ -37,14 +44,6 @@ import {
   selectAndInsertOfficialPicks,
 } from '@/lib/officialPicksService'
 import { getTodaySlateGameIds, getTodaySlateRange, filterToWindow } from '@/lib/slateUtils'
-import {
-  cacheInjuries,
-  cacheBettingSplits,
-  cacheSchedules,
-  isSdioConfigured,
-  refreshOddsCacheFromSdio,
-  updateGameScoresFromSdio,
-} from '@/lib/sportsDataIOService'
 
 async function verifyAdmin(): Promise<boolean> {
   const session = await getSession()
@@ -61,11 +60,11 @@ async function verifyAdmin(): Promise<boolean> {
 
 async function doRefreshOdds() {
   const start = Date.now()
-  if (!isSdioConfigured()) {
-    return { step: 'refresh_odds', success: false, durationMs: 0, error: 'SportsDataIO not configured (TheOddsAPI paused)' }
+  if (!isOddsApiConfigured()) {
+    return { step: 'refresh_odds', success: false, durationMs: 0, error: 'ODDS_API_KEY not configured' }
   }
   try {
-    const result = await refreshOddsCacheFromSdio()
+    const result = await refreshOddsCache()
     return {
       step: 'refresh_odds',
       success: result.success,
@@ -79,11 +78,11 @@ async function doRefreshOdds() {
 
 async function doRefreshScores() {
   const start = Date.now()
-  if (!isSdioConfigured()) {
-    return { step: 'refresh_scores', success: false, durationMs: 0, error: 'SportsDataIO not configured' }
+  if (!isOddsApiConfigured()) {
+    return { step: 'refresh_scores', success: false, durationMs: 0, error: 'ODDS_API_KEY not configured' }
   }
   try {
-    const result = await updateGameScoresFromSdio()
+    const result = await fetchAndUpdateGameScores()
     return {
       step: 'refresh_scores',
       success: result.errors.length === 0,
@@ -123,11 +122,10 @@ async function doRecalculateEdges() {
 async function doRefreshSlate() {
   // Slate filtering is computed at query time — no DB action needed.
   // We return the current window so the admin can see what's active.
-  // Uses getTodaySlateGameIds() which applies .lt(end) + JS-filter workaround for nubase.
   const start = Date.now()
   const { gameIds, slateStart, slateEnd, count } = await getTodaySlateGameIds()
 
-  // Also pull cached_odds row count per league so admin can verify SDIO odds wrote correctly
+  // Also pull cached_odds row count per league so admin can verify TheOddsAPI odds wrote correctly
   // even before prediction sync runs.
   const { data: oddsRows } = await supabaseAdmin
     .from('cached_odds')
@@ -180,60 +178,6 @@ async function doGradePicks() {
       errors: gradeResult.errors,
       modelStats: { wins, losses, pushes },
     },
-  }
-}
-
-async function doRefreshInjuries() {
-  const start = Date.now()
-  if (!isSdioConfigured()) {
-    return { step: 'refresh_injuries', success: false, durationMs: 0, error: 'SportsDataIO not configured' }
-  }
-  try {
-    const result = await cacheInjuries()
-    return {
-      step: 'refresh_injuries',
-      success: result.errors.length === 0,
-      durationMs: Date.now() - start,
-      detail: { cached: result.cached, cachedAt: result.cachedAt, errors: result.errors },
-    }
-  } catch (err) {
-    return { step: 'refresh_injuries', success: false, durationMs: Date.now() - start, error: String(err) }
-  }
-}
-
-async function doRefreshBettingSplits() {
-  const start = Date.now()
-  if (!isSdioConfigured()) {
-    return { step: 'refresh_betting_splits', success: false, durationMs: 0, error: 'SportsDataIO not configured' }
-  }
-  try {
-    const result = await cacheBettingSplits()
-    return {
-      step: 'refresh_betting_splits',
-      success: result.errors.length === 0,
-      durationMs: Date.now() - start,
-      detail: { cached: result.cached, cachedAt: result.cachedAt, errors: result.errors },
-    }
-  } catch (err) {
-    return { step: 'refresh_betting_splits', success: false, durationMs: Date.now() - start, error: String(err) }
-  }
-}
-
-async function doRefreshSchedules() {
-  const start = Date.now()
-  if (!isSdioConfigured()) {
-    return { step: 'refresh_schedules', success: false, durationMs: 0, error: 'SportsDataIO not configured' }
-  }
-  try {
-    const result = await cacheSchedules()
-    return {
-      step: 'refresh_schedules',
-      success: result.errors.length === 0,
-      durationMs: Date.now() - start,
-      detail: { cached: result.cached, leagues: result.leagues, errors: result.errors },
-    }
-  } catch (err) {
-    return { step: 'refresh_schedules', success: false, durationMs: Date.now() - start, error: String(err) }
   }
 }
 
@@ -293,23 +237,23 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    if (action === 'refresh_injuries') {
-      const result = await doRefreshInjuries()
-      return NextResponse.json({ success: result.success, results: [result], totalDurationMs: Date.now() - totalStart })
-    }
-
-    if (action === 'refresh_betting_splits') {
-      const result = await doRefreshBettingSplits()
-      return NextResponse.json({ success: result.success, results: [result], totalDurationMs: Date.now() - totalStart })
-    }
-
-    if (action === 'refresh_schedules') {
-      const result = await doRefreshSchedules()
-      return NextResponse.json({ success: result.success, results: [result], totalDurationMs: Date.now() - totalStart })
+    // SportsDataIO actions — PAUSED
+    if (action === 'refresh_injuries' || action === 'refresh_betting_splits' || action === 'refresh_schedules') {
+      return NextResponse.json({
+        success: false,
+        results: [{
+          step: action,
+          success: false,
+          durationMs: 0,
+          disabled: true,
+          note: 'Coming Soon — SportsDataIO paused. Feature will return in a future update.',
+        }],
+        totalDurationMs: Date.now() - totalStart,
+      })
     }
 
     if (action === 'full_cycle') {
-      // Run all steps in sequence
+      // Run all active steps in sequence (SDIO steps excluded while paused)
       const results = []
 
       const oddsResult = await doRefreshOdds()
@@ -326,15 +270,6 @@ export async function POST(req: NextRequest) {
 
       const gradeResult = await doGradePicks()
       results.push(gradeResult)
-
-      const injuriesResult = await doRefreshInjuries()
-      results.push(injuriesResult)
-
-      const splitsResult = await doRefreshBettingSplits()
-      results.push(splitsResult)
-
-      const schedulesResult = await doRefreshSchedules()
-      results.push(schedulesResult)
 
       const anyFailed = results.some((r) => !r.success)
       return NextResponse.json({
@@ -357,7 +292,6 @@ export async function GET() {
   }
 
   // Fetch slate info and other data in parallel.
-  // Uses lt-only + JS-filter to work around nubase .gte+.lt bug.
   const { start, end } = getTodaySlateRange()
 
   const [
