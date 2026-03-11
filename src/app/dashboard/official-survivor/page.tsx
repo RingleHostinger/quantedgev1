@@ -59,6 +59,7 @@ interface OfficialData {
   activeRound?: number
   isAdmin?: boolean
   roundStates?: Record<string, string>
+  activeContestDay?: number
 }
 
 // ─── Main Component ────────────────────────────────────────────────────────
@@ -349,7 +350,9 @@ export default function OfficialSurvivorPage() {
           <Trophy className="w-6 h-6" style={{ color: '#00FFA3' }} />
           <div>
             <h1 className="text-xl font-bold" style={{ color: '#E6E6FA' }}>Official Survivor</h1>
-            <p className="text-xs" style={{ color: '#6B6B80' }}>{totalEntrants} entrants · {aliveEntrants} alive</p>
+            <p className="text-xs" style={{ color: '#6B6B80' }}>
+              Powered by <span style={{ color: '#A0A0B0' }}>Sponsor</span>
+            </p>
           </div>
         </div>
 
@@ -388,12 +391,23 @@ export default function OfficialSurvivorPage() {
 
       {/* Tournament Bracket - Always visible */}
       {bracketData && (
-        <SurvivorBracketView
-          bracketData={bracketData}
-          activeRound={activeRound}
-          userPicks={userPicks}
-          entryStatus={currentEntry?.status}
-        />
+        <div className="relative">
+          {/* Sponsor watermark behind bracket */}
+          <div
+            className="absolute inset-0 flex items-center justify-center pointer-events-none select-none"
+            style={{ opacity: 0.12 }}
+          >
+            <span className="text-8xl font-black tracking-wider" style={{ color: '#00FFA3' }}>
+              SPONSOR
+            </span>
+          </div>
+          <SurvivorBracketView
+            bracketData={bracketData}
+            activeRound={activeRound}
+            userPicks={userPicks}
+            entryStatus={currentEntry?.status}
+          />
+        </div>
       )}
 
       {/* No bracket data message */}
@@ -403,6 +417,21 @@ export default function OfficialSurvivorPage() {
           <p className="text-sm" style={{ color: '#6B6B80' }}>Tournament bracket will appear here once available.</p>
         </div>
       )}
+
+      {/* Sponsor button */}
+      <div className="flex justify-center">
+        <a
+          href="#"
+          className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold transition-all hover:opacity-80"
+          style={{
+            background: 'rgba(255,255,255,0.06)',
+            color: '#A0A0B0',
+            border: '1px solid rgba(255,255,255,0.1)',
+          }}
+        >
+          Branding / Link Here
+        </a>
+      </div>
 
       {/* Entry Selector - if user has entries */}
       {myEntries.length > 0 && (

@@ -76,62 +76,76 @@ function GameCard({
     onTeamSelect({ teamName, teamSeed, opponentName: oppName, opponentSeed: oppSeed })
   }
 
-  // Determine card border color
-  let borderColor = 'rgba(255,255,255,0.06)'
-  if (team1Selected || team2Selected) borderColor = 'rgba(0,255,163,0.4)'
-  else if (hasWinner) borderColor = 'rgba(255,255,255,0.08)'
+  // Determine card styles
+  let borderColor = 'rgba(255,255,255,0.08)'
+  let cardBg = '#16162A'
+  if (team1Selected || team2Selected) {
+    borderColor = '#00FFA3'
+    cardBg = 'rgba(0,255,163,0.05)'
+  } else if (hasWinner) {
+    borderColor = 'rgba(255,255,255,0.06)'
+    cardBg = '#1A1A2E'
+  }
 
   return (
-    <div className="rounded-xl overflow-hidden" style={{ background: '#1A1A2E', border: `1px solid ${borderColor}` }}>
-      {/* Game header */}
-      <div className="px-3 py-1.5 flex items-center justify-between" style={{ background: 'rgba(255,255,255,0.02)' }}>
-        <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: '#4A4A60' }}>
-          {regionLabel ? `${regionLabel} Region` : `Game ${matchupIndex + 1}`}
+    <div
+      className="rounded-lg overflow-hidden transition-all hover:shadow-lg"
+      style={{
+        background: cardBg,
+        border: `2px solid ${borderColor}`,
+        boxShadow: team1Selected || team2Selected ? '0 0 20px rgba(0,255,163,0.15)' : 'none',
+      }}
+    >
+      {/* Compact header - only show region for round 64 */}
+      <div className="px-3 py-1.5 flex items-center justify-between" style={{ background: 'rgba(0,0,0,0.2)' }}>
+        <span className="text-[9px] font-semibold uppercase tracking-wider" style={{ color: '#6B6B80' }}>
+          {regionLabel || `Game ${matchupIndex + 1}`}
         </span>
-        {hasWinner && (
-          <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded"
-            style={{ background: 'rgba(0,255,163,0.1)', color: '#00FFA3' }}>
-            Final
-          </span>
-        )}
-        {isTBD && !hasWinner && (
-          <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded"
-            style={{ background: 'rgba(255,255,255,0.05)', color: '#4A4A60' }}>
-            TBD
-          </span>
-        )}
-        {isLocked && !hasWinner && !isTBD && (
-          <Lock className="w-3 h-3" style={{ color: '#4A4A60' }} />
-        )}
+        <div className="flex items-center gap-1.5">
+          {hasWinner && (
+            <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded"
+              style={{ background: 'rgba(0,255,163,0.15)', color: '#00FFA3' }}>
+              Done
+            </span>
+          )}
+          {isTBD && !hasWinner && (
+            <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded"
+              style={{ background: 'rgba(255,255,255,0.06)', color: '#4A4A60' }}>
+              TBD
+            </span>
+          )}
+          {isLocked && !hasWinner && !isTBD && (
+            <Lock className="w-3 h-3" style={{ color: '#6B6B80' }} />
+          )}
+        </div>
       </div>
 
-      {/* Team 1 row */}
-      <TeamRow
-        teamName={matchup.team1}
-        teamSeed={matchup.team1Seed}
-        isEmpty={team1Empty}
-        isWinner={team1Won}
-        isLoser={hasWinner && !team1Won}
-        isSelected={team1Selected}
-        isUsed={team1Used}
-        canClick={canClick && !team1Used && !team1Empty}
-        onClick={() => handleTeamClick('team1')}
-      />
+      {/* Team rows with tighter spacing */}
+      <div className="divide-y" style={{ borderColor: 'rgba(255,255,255,0.04)' }}>
+        <TeamRow
+          teamName={matchup.team1}
+          teamSeed={matchup.team1Seed}
+          isEmpty={team1Empty}
+          isWinner={team1Won}
+          isLoser={hasWinner && !team1Won}
+          isSelected={team1Selected}
+          isUsed={team1Used}
+          canClick={canClick && !team1Used && !team1Empty}
+          onClick={() => handleTeamClick('team1')}
+        />
 
-      <div className="h-px" style={{ background: 'rgba(255,255,255,0.04)' }} />
-
-      {/* Team 2 row */}
-      <TeamRow
-        teamName={matchup.team2}
-        teamSeed={matchup.team2Seed}
-        isEmpty={team2Empty}
-        isWinner={team2Won}
-        isLoser={hasWinner && !team2Won}
-        isSelected={team2Selected}
-        isUsed={team2Used}
-        canClick={canClick && !team2Used && !team2Empty}
-        onClick={() => handleTeamClick('team2')}
-      />
+        <TeamRow
+          teamName={matchup.team2}
+          teamSeed={matchup.team2Seed}
+          isEmpty={team2Empty}
+          isWinner={team2Won}
+          isLoser={hasWinner && !team2Won}
+          isSelected={team2Selected}
+          isUsed={team2Used}
+          canClick={canClick && !team2Used && !team2Empty}
+          onClick={() => handleTeamClick('team2')}
+        />
+      </div>
     </div>
   )
 }
@@ -157,10 +171,12 @@ function TeamRow({
   canClick: boolean
   onClick: () => void
 }) {
+  // Dynamic background based on state
   let bgStyle = 'transparent'
-  if (isSelected) bgStyle = 'rgba(0,255,163,0.1)'
-  else if (isWinner) bgStyle = 'rgba(0,255,163,0.05)'
+  if (isSelected) bgStyle = 'rgba(0,255,163,0.12)'
+  else if (isWinner) bgStyle = 'rgba(0,255,163,0.06)'
 
+  // Dynamic text color
   let nameColor = '#E6E6FA'
   if (isEmpty) nameColor = '#4A4A60'
   else if (isLoser) nameColor = '#4A4A60'
@@ -168,24 +184,36 @@ function TeamRow({
   else if (isWinner) nameColor = '#00FFA3'
   else if (isUsed) nameColor = '#6B6B80'
 
+  // Seed color
+  let seedColor = '#6B6B80'
+  if (isSelected) seedColor = '#00FFA3'
+  else if (isWinner) seedColor = '#00FFA3'
+  else if (isUsed) seedColor = '#6B6B80'
+
   return (
     <button
       onClick={onClick}
       disabled={!canClick}
-      className="w-full flex items-center gap-2.5 px-3 py-2.5 transition-all text-left"
+      className="w-full flex items-center gap-2 px-3 py-2 transition-all text-left hover:bg-white/[0.02] disabled:hover:bg-transparent"
       style={{
         background: bgStyle,
-        opacity: isLoser ? 0.4 : 1,
+        opacity: isLoser ? 0.35 : 1,
         cursor: canClick ? 'pointer' : 'default',
       }}
     >
-      {/* Seed */}
-      <span className="text-[11px] font-bold w-5 text-center tabular-nums flex-shrink-0" style={{ color: '#6B6B80' }}>
+      {/* Seed - prominent display */}
+      <span
+        className="text-[12px] font-bold w-6 text-center tabular-nums flex-shrink-0 rounded"
+        style={{
+          color: seedColor,
+          background: isSelected ? 'rgba(0,255,163,0.15)' : 'transparent',
+        }}
+      >
         {isEmpty ? '-' : teamSeed}
       </span>
 
-      {/* Team name */}
-      <span className="text-sm font-semibold truncate flex-1" style={{ color: nameColor }}>
+      {/* Team name - larger, more readable */}
+      <span className="text-[13px] font-semibold truncate flex-1" style={{ color: nameColor }}>
         {isEmpty ? 'TBD' : teamName}
       </span>
 
@@ -193,8 +221,10 @@ function TeamRow({
       <div className="flex-shrink-0">
         {isSelected && <CheckCircle className="w-4 h-4" style={{ color: '#00FFA3' }} />}
         {isUsed && !isSelected && !isLoser && (
-          <span className="flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded"
-            style={{ background: 'rgba(239,68,68,0.1)', color: '#F87171' }}>
+          <span
+            className="flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded"
+            style={{ background: 'rgba(239,68,68,0.12)', color: '#F87171' }}
+          >
             <Ban className="w-2.5 h-2.5" /> Used
           </span>
         )}
@@ -244,7 +274,8 @@ export function RoundGameCards({
           </span>
         </div>
       )}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      {/* Use more columns for better width utilization */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
         {entries.map(([key, matchup]) => (
           <GameCard
             key={key}

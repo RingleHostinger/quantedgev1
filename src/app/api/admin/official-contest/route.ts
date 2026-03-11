@@ -93,7 +93,7 @@ export async function GET(_req: NextRequest) {
   })
 }
 
-// POST: Update round states (open/close/grade)
+// POST: Update round states or contest day
 export async function POST(req: NextRequest) {
   const session = await getSession()
   if (!session?.userId || session.role !== 'admin') {
@@ -101,6 +101,27 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json()
+
+  // Handle contest day update
+  if (body.action === 'set_contest_day') {
+    const { contest_day } = body
+    if (!contest_day || typeof contest_day !== 'number' || contest_day < 1) {
+      return NextResponse.json({ error: 'Valid contest_day is required' }, { status: 400 })
+    }
+
+    const { error } = await supabaseAdmin
+      .from('survivor_pools')
+      .update({ active_contest_day: contest_day })
+      .eq('is_official', true)
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    return NextResponse.json({ success: true, active_contest_day: contest_day })
+  }
+
+  // Handle round state update (open/close/grade)
   const { round_key, state } = body
 
   if (!round_key || !state) {

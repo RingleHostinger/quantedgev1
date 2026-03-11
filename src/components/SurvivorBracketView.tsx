@@ -146,7 +146,7 @@ function MatchupCard({ matchup, roundKey, matchupIndex, userPicks, roundNumber, 
 }
 
 export function SurvivorBracketView({ bracketData, activeRound, userPicks, entryStatus }: SurvivorBracketViewProps) {
-  const [expanded, setExpanded] = useState(true) // Start expanded for better UX
+  const [expanded, setExpanded] = useState(true)
   const results = bracketData.results
 
   if (!results) {
@@ -155,6 +155,48 @@ export function SurvivorBracketView({ bracketData, activeRound, userPicks, entry
         <p className="text-xs" style={{ color: '#6B6B80' }}>Bracket data not available yet.</p>
       </div>
     )
+  }
+
+  // Calculate visual priority based on active round
+  const getRoundStyle = (roundNum: number, totalMatchups: number) => {
+    const isActive = roundNum === activeRound
+    const isPast = roundNum < activeRound
+
+    // Active round: full size, green highlight
+    // Past rounds: smaller, muted
+    // Future rounds: smallest, most compact
+    if (isActive) {
+      return {
+        scale: 1,
+        opacity: 1,
+        minWidth: '140px',
+        padding: '8px',
+        headerColor: '#00FFA3',
+        borderColor: 'rgba(0,255,163,0.4)',
+        background: 'rgba(0,255,163,0.03)',
+      }
+    } else if (isPast) {
+      return {
+        scale: 0.7,
+        opacity: 0.8,
+        minWidth: '80px',
+        padding: '4px',
+        headerColor: '#6B6B80',
+        borderColor: 'rgba(255,255,255,0.04)',
+        background: 'transparent',
+      }
+    } else {
+      // Future rounds
+      return {
+        scale: 0.55,
+        opacity: 0.6,
+        minWidth: '60px',
+        padding: '2px',
+        headerColor: '#4A4A60',
+        borderColor: 'rgba(255,255,255,0.02)',
+        background: 'transparent',
+      }
+    }
   }
 
   return (
@@ -179,38 +221,42 @@ export function SurvivorBracketView({ bracketData, activeRound, userPicks, entry
       </button>
 
       {expanded && (
-        <div className="border-t overflow-x-auto" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
-          {/* Compact bracket layout - smaller cards, tighter spacing */}
-          <div className="flex gap-1.5 p-2" style={{ minWidth: '750px' }}>
+        <div className="border-t overflow-x-auto py-3" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+          {/* Traditional bracket layout - active round prominent */}
+          <div className="flex items-start gap-2 px-2" style={{ minWidth: '900px' }}>
             {ROUND_KEYS.map((roundKey, idx) => {
               const roundNum = idx + 1
               const roundMatchups = results[roundKey] ?? {}
               const entries = sortMatchupEntries(
                 Object.entries(roundMatchups) as [string, BracketMatchup][]
               )
-              const isActive = roundNum === activeRound
-
-              // Scale down later rounds (fewer matchups = smaller cards)
-              const matchupCount = entries.length
-              const scaleFactor = matchupCount <= 1 ? 0.5 : matchupCount <= 2 ? 0.6 : matchupCount <= 4 ? 0.75 : 1
+              const style = getRoundStyle(roundNum, entries.length)
 
               return (
-                <div key={roundKey} className="flex-1 min-w-[90px]" style={{ transform: `scale(${scaleFactor})`, transformOrigin: 'top center' }}>
+                <div
+                  key={roundKey}
+                  className="flex-shrink-0 rounded-lg"
+                  style={{
+                    minWidth: style.minWidth,
+                    padding: style.padding,
+                    background: style.background,
+                    border: `1px solid ${style.borderColor}`,
+                    transform: `scale(${style.scale})`,
+                    transformOrigin: 'top center',
+                    opacity: style.opacity,
+                  }}
+                >
                   {/* Round header */}
-                  <div
-                    className="text-center mb-1 pb-1 border-b"
-                    style={{
-                      borderColor: isActive ? 'rgba(0,255,163,0.3)' : 'rgba(255,255,255,0.06)',
-                    }}
-                  >
-                    <div className="text-[9px] font-bold uppercase tracking-wider" style={{
-                      color: isActive ? '#00FFA3' : '#6B6B80',
+                  <div className="text-center mb-2">
+                    <div className="text-[10px] font-bold uppercase tracking-wider" style={{
+                      color: style.headerColor,
                     }}>
                       {ROUND_LABELS[roundKey]}
                     </div>
                   </div>
-                  {/* Matchups - compact */}
-                  <div className="space-y-1">
+
+                  {/* Matchups */}
+                  <div className="space-y-1.5">
                     {entries.map(([key, matchup]) => (
                       <MatchupCard
                         key={key}

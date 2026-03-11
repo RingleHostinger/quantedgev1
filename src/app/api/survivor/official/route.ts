@@ -45,7 +45,7 @@ export async function GET(_req: NextRequest) {
   // Official pool
   const { data: pool, error: poolErr } = await supabaseAdmin
     .from('survivor_pools')
-    .select('id, pool_name, pool_size, pick_format, team_reuse, strike_rule, is_active, created_at, bracket_data, bracket_confirmed, round_states')
+    .select('id, pool_name, pool_size, pick_format, team_reuse, strike_rule, is_active, created_at, bracket_data, bracket_confirmed, round_states, active_contest_day')
     .eq('is_official', true)
     .single()
 
@@ -254,6 +254,7 @@ export async function GET(_req: NextRequest) {
     activeRound,
     isAdmin,
     roundStates: pool.round_states || { round64: 'open', round32: 'open', sweet16: 'open', elite8: 'open', finalFour: 'open', championship: 'open' },
+    activeContestDay: pool.active_contest_day || 1,
   })
 }
 
@@ -398,10 +399,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'This entry is no longer active' }, { status: 400 })
   }
 
-  // Fetch the official pool to check is_active and round states
+  // Fetch the official pool to check is_active, round states, and contest day
   const { data: pool } = await supabaseAdmin
     .from('survivor_pools')
-    .select('id, is_active, round_states')
+    .select('id, is_active, round_states, active_contest_day')
     .eq('id', entry.pool_id)
     .single()
 
@@ -430,12 +431,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'This round is currently closed for picks' }, { status: 400 })
   }
 
-  // Check if this entry has been eliminated
-  const { data: existingPicks } = await supabaseAdmin
+  // Contest day logic: 1 pick per day, except days 1,2,7,8 allow 2 picks
+  const activeContestDay = pool.active_contest_day || 1
+  const doublePickDays = [1, 2, 7, 8] // Days that allow 2 picks
+  const maxPicksPerDay = doublePickDays.includes(activeContestDay) ? 2 : 1
+
+  // Get all existing picks for this entry
+  const { data: allPicks } = await supabaseAdmin
     .from('survivor_picks')
-    .select('id, round_number, result, team_name')
+    .select('id, round_number, result, team_name, contest_day')
     .eq('official_entry_id', entry_id)
     .order('round_number', { ascending: true })
+
+  // Filter to pending picks for the current contest day
+  const existingPicks = allPicks?.filter(p => p.result === 'pending') ?? []
 
   const isEliminated = (existingPicks ?? []).some((p) => p.result === 'eliminated')
   if (isEliminated) {
@@ -447,8 +456,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'This round has already been resolved' }, { status: 400 })
   }
 
-  // Team reuse validation: check if this team was already picked in a previous round
-  const previousTeams = (existingPicks ?? [])
+  // Check pick limit for current contest day (allow editing existing pick)
+  const currentDayPicks = (existingPicks ?? []).filter(p => p.contest_day === activeContestDay)
+  if (!existingRoundPick && currentDayPicks.length >= maxPicksPerDay) {
+    const pickText = maxPicksPerDay === 2 ? '2 picks' : '1 pick'
+    return NextResponse.json({ error: `You have already used your ${pickText} for contest day ${activeContestDay}. Come back tomorrow!` }, { status: 400 })
+  }
+
+  // Team reuse validation: check if this team was already picked in a previous round (across all picks)
+  const previousTeams = (allPicks ?? [])
     .filter((p) => p.round_number !== round_number)
     .map((p) => p.team_name as string)
     .filter(Boolean)
@@ -486,6 +502,7 @@ export async function POST(req: NextRequest) {
         user_id: session.userId,
         official_entry_id: entry_id,
         round_number,
+        contest_day: activeContestDay,
         team_name,
         team_seed: team_seed ?? null,
         opponent_name: opponent_name ?? null,
