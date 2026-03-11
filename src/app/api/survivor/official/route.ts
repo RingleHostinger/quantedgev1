@@ -305,13 +305,25 @@ export async function GET(_req: NextRequest) {
   const prizePool = computePrizePool(entries.length)
 
   // ─── Bracket Data & Round Status ──────────────────────────────────────────
-  // Determine which bracket data to use: test mode uses saved test data, otherwise use pool's bracket
+  // Use pool's bracket data (or test bracket data for admin)
   let liveBracketData: OfficialBracketData | null = null
-  if (isTestMode && testBracketData) {
-    liveBracketData = testBracketData as OfficialBracketData
-  } else if (isAdminPreview && testBracketData) {
-    liveBracketData = testBracketData as OfficialBracketData
-  } else if (pool.bracket_data) {
+
+  // Try to load test bracket data for admin users
+  if (currentUser?.role === 'admin') {
+    const { data: testBracketSetting } = await supabaseAdmin
+      .from('admin_settings')
+      .select('value')
+      .eq('key', 'survivor_test_bracket_data')
+      .single()
+    if (testBracketSetting?.value) {
+      try {
+        liveBracketData = JSON.parse(testBracketSetting.value) as OfficialBracketData
+      } catch { /* ignore parse errors */ }
+    }
+  }
+
+  // Fall back to pool's bracket data if no test data
+  if (!liveBracketData && pool.bracket_data) {
     liveBracketData = pool.bracket_data as OfficialBracketData
   }
 
@@ -333,22 +345,12 @@ export async function GET(_req: NextRequest) {
   return NextResponse.json({
     pool,
     myEntries: myLeaderboardRows,
-    myEntryCount,
-    canPurchaseMore: myEntryCount < 3,
-    remainingSlots: Math.max(0, 3 - myEntryCount),
     leaderboard,
     currentRound,
     totalEntrants: entries.length,
-    prizePool,
-    bracketLive,
-    isAdmin,
-    isAdminPreview,
-    isTestMode,
-    testBracketData,
     bracketData: liveBracketData,
     roundCompletionStatus,
     activeRound,
-    usedTeamsByEntry,
   })
 }
 
