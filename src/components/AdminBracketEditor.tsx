@@ -29,6 +29,7 @@ interface AdminBracketEditorProps {
   onConfirm: (data: OfficialBracketData) => Promise<void>
   onLoadTeams: () => Promise<Record<string, BracketTeam[]> | null>
   onGradeGame: (roundKey: string, matchupKey: string, winner: string) => Promise<void>
+  onLockGame?: (roundKey: string, matchupKey: string, locked: boolean) => Promise<void>
   onSaveTestPreview?: (data: OfficialBracketData) => Promise<void>
 }
 
@@ -494,6 +495,33 @@ export default function AdminBracketEditor({
     } catch (error) {
       console.error('Failed to grade game:', error)
       setMessage({ type: 'error', text: 'Failed to grade game' })
+    }
+  }
+
+  // Handle locking/unlocking a game
+  const handleLockGame = async (roundKey: string, matchupKey: string, currentlyLocked: boolean) => {
+    try {
+      await onLockGame(roundKey, matchupKey, !currentlyLocked)
+
+      // Update local results
+      setResults(prev => {
+        const updated = { ...prev }
+        if (updated[roundKey] && updated[roundKey][matchupKey]) {
+          updated[roundKey] = {
+            ...updated[roundKey],
+            [matchupKey]: {
+              ...updated[roundKey][matchupKey],
+              locked: !currentlyLocked
+            }
+          }
+        }
+        return updated
+      })
+
+      setMessage({ type: 'success', text: currentlyLocked ? 'Game unlocked!' : 'Game locked!' })
+    } catch (error) {
+      console.error('Failed to lock game:', error)
+      setMessage({ type: 'error', text: 'Failed to lock game' })
     }
   }
 
@@ -1005,6 +1033,7 @@ export default function AdminBracketEditor({
                       }
 
                       const winner = matchup.winner
+                      const isLocked = matchup.locked || false
                       const pendingWinner = pendingWinners[roundKey]?.[matchupKey]
                       const hasPending = pendingWinner !== undefined
 
@@ -1124,6 +1153,21 @@ export default function AdminBracketEditor({
                             >
                               <Check className="w-3 h-3" />
                               Confirm Winner
+                            </button>
+                          )}
+
+                          {/* Lock/Unlock Game button */}
+                          {onLockGame && !winner && (
+                            <button
+                              onClick={() => handleLockGame(roundKey, matchupKey, isLocked)}
+                              className="w-full mt-2 py-1.5 rounded text-xs font-medium flex items-center justify-center gap-1 transition-all hover:opacity-80"
+                              style={{
+                                background: isLocked ? 'rgba(239,68,68,0.2)' : 'rgba(147,51,234,0.2)',
+                                color: isLocked ? '#EF4444' : '#A855F7'
+                              }}
+                            >
+                              <Lock className="w-3 h-3" />
+                              {isLocked ? 'Unlock Game' : 'Lock Game'}
                             </button>
                           )}
                         </div>

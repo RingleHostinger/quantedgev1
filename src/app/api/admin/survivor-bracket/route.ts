@@ -351,6 +351,54 @@ export async function POST(req: NextRequest) {
     })
   }
 
+  // Action: lock_game - Lock/unlock individual game
+  if (action === 'lock_game') {
+    const { roundKey, matchupKey, locked } = body
+
+    if (!roundKey || matchupKey === undefined) {
+      return NextResponse.json({ error: 'roundKey and matchupKey are required' }, { status: 400 })
+    }
+
+    // Get current bracket data
+    const { data: pool } = await supabaseAdmin
+      .from('survivor_pools')
+      .select('bracket_data')
+      .eq('is_official', true)
+      .single()
+
+    if (!pool) {
+      return NextResponse.json({ error: 'Official pool not found' }, { status: 404 })
+    }
+
+    const currentBracketData = (pool.bracket_data as Record<string, unknown>) || {}
+    const results = (currentBracketData.results as Record<string, Record<string, Record<string, unknown>>>) || {}
+
+    // Update the specific game's locked status
+    if (!results[roundKey]) {
+      results[roundKey] = {}
+    }
+    if (!results[roundKey][matchupKey]) {
+      results[roundKey][matchupKey] = {}
+    }
+    results[roundKey][matchupKey].locked = locked
+
+    // Save back
+    const { error: lockError } = await supabaseAdmin
+      .from('survivor_pools')
+      .update({ bracket_data: { ...currentBracketData, results } })
+      .eq('is_official', true)
+
+    if (lockError) {
+      return NextResponse.json({ error: lockError.message }, { status: 500 })
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: locked ? 'Game locked' : 'Game unlocked',
+      bracketData: { ...currentBracketData, results },
+    })
+  }
+
   // Just save/update bracket data
   const { error: updateError } = await supabaseAdmin
     .from('survivor_pools')

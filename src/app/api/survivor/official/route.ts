@@ -423,7 +423,10 @@ export async function POST(req: NextRequest) {
   const roundStates = pool.round_states || { round64: 'open', round32: 'open', sweet16: 'open', elite8: 'open', finalFour: 'open', championship: 'open' }
   const roundState = roundKey ? (roundStates as Record<string, string>)[roundKey] : 'open'
 
-  // Check if round is closed or graded
+  // Check if round is pending, closed, or graded
+  if (roundState === 'pending') {
+    return NextResponse.json({ error: 'This round is pending and not yet open for picks' }, { status: 400 })
+  }
   if (roundState === 'graded') {
     return NextResponse.json({ error: 'This round has been graded and is locked' }, { status: 400 })
   }

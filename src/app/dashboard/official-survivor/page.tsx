@@ -25,6 +25,7 @@ interface SurvivorPickRow {
   opponent_name: string | null
   result: 'pending' | 'won' | 'eliminated'
   picked_at: string
+  contest_day: number | null
 }
 
 interface LeaderboardRow {
@@ -245,13 +246,22 @@ export default function OfficialSurvivorPage() {
   const hasSubmittedPick = existingPick != null
   const hasPendingPick = currentPick != null
 
+  // Calculate picks for current contest day
+  const doublePickDays = [1, 2, 7, 8]
+  const maxPicksPerDay = doublePickDays.includes(activeContestDay) ? 2 : 1
+  const currentDayPicks = currentEntry?.picks.filter((p) => p.contest_day === activeContestDay && p.result === 'pending') ?? []
+  const picksUsedToday = currentDayPicks.length
+  const picksRemainingToday = maxPicksPerDay - picksUsedToday
+
   // Count alive entries
   const aliveEntrants = leaderboard.filter((r) => r.status === 'alive').length
   const myAliveEntries = myEntries.filter((e) => e.status === 'alive').length
 
-  // Handle team selection
+  // Handle team selection - supports multiple picks per day
   const handleTeamSelect = (selection: PickSelection) => {
-    if (!currentEntryId || isEntryEliminated) return
+    if (!currentEntryId || isEntryEliminated || isCurrentRoundLocked) return
+    // Allow pick if: no pending pick yet OR picks remaining today
+    if (!currentPick && picksRemainingToday <= 0) return
     setPendingPicks(prev => ({
       ...prev,
       [currentEntryId]: selection
@@ -520,14 +530,41 @@ export default function OfficialSurvivorPage() {
 
           {/* Game Cards for Active Round */}
           {activeRoundMatchups && Object.keys(activeRoundMatchups).length > 0 && !isEntryEliminated && (
-            <div className="space-y-3">
-              <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: '#6B6B80' }}>
-                Make Your Pick - {ROUND_LABELS[activeRoundKey]}
-              </h2>
+            <div className="space-y-4">
+              {/* Enhanced Pick Header - Clear round/day and pick counter */}
+              <div className="rounded-xl p-4" style={{ background: 'linear-gradient(135deg, rgba(0,255,163,0.08) 0%, rgba(0,255,163,0.02) 100%)', border: '1px solid rgba(0,255,163,0.2)' }}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-lg font-bold" style={{ color: '#00FFA3' }}>
+                      {ROUND_LABELS[activeRoundKey]} — Day {activeContestDay} Picks
+                    </h2>
+                    <p className="text-xs mt-1" style={{ color: '#A0A0B0' }}>
+                      {maxPicksPerDay === 2 ? '2 picks available today' : '1 pick available today'}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-2xl font-bold" style={{ color: '#00FFA3' }}>
+                      {picksUsedToday} / {maxPicksPerDay}
+                    </div>
+                    <div className="text-xs" style={{ color: '#6B6B80' }}>picks used</div>
+                  </div>
+                </div>
+                {/* Pick remaining indicator */}
+                {picksRemainingToday > 0 && (
+                  <div className="mt-3 text-xs" style={{ color: '#00FFA3' }}>
+                    {picksRemainingToday} {picksRemainingToday === 1 ? 'pick' : 'picks'} remaining today
+                  </div>
+                )}
+                {picksRemainingToday <= 0 && (
+                  <div className="mt-3 text-xs" style={{ color: '#F59E0B' }}>
+                    No picks remaining today — come back tomorrow!
+                  </div>
+                )}
+              </div>
 
               {/* Round Status Banner */}
               {isCurrentRoundLocked && (
-                <div className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl mb-4" style={{ background: currentRoundState === 'graded' ? 'rgba(239,68,68,0.1)' : 'rgba(250,204,21,0.1)', border: `1px solid ${currentRoundState === 'graded' ? 'rgba(239,68,68,0.3)' : 'rgba(250,204,21,0.3)'}` }}>
+                <div className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl" style={{ background: currentRoundState === 'graded' ? 'rgba(239,68,68,0.1)' : 'rgba(250,204,21,0.1)', border: `1px solid ${currentRoundState === 'graded' ? 'rgba(239,68,68,0.3)' : 'rgba(250,204,21,0.3)'}` }}>
                   <Lock className="w-4 h-4" style={{ color: currentRoundState === 'graded' ? '#EF4444' : '#EAB308' }} />
                   <span className="text-sm font-medium" style={{ color: currentRoundState === 'graded' ? '#EF4444' : '#EAB308' }}>
                     {currentRoundState === 'graded' ? 'Round Graded - Picks Locked' : 'Round Closed - Picks Locked'}

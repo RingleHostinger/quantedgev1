@@ -12,6 +12,7 @@ export interface BracketMatchup {
   team2: string
   team2Seed: number
   winner: string | null
+  locked?: boolean  // Individual game lock for manual locking
 }
 
 export interface OfficialBracketData {

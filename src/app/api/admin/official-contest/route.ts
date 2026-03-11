@@ -128,9 +128,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'round_key and state are required' }, { status: 400 })
   }
 
-  const validStates = ['open', 'closed', 'graded']
+  const validStates = ['pending', 'open', 'closed', 'graded']
   if (!validStates.includes(state)) {
-    return NextResponse.json({ error: 'state must be open, closed, or graded' }, { status: 400 })
+    return NextResponse.json({ error: 'state must be pending, open, closed, or graded' }, { status: 400 })
   }
 
   const validRoundKeys = ['round64', 'round32', 'sweet16', 'elite8', 'finalFour', 'championship']

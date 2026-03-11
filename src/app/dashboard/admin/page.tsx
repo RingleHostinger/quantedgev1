@@ -456,6 +456,24 @@ export default function AdminPage() {
     } catch { setBracketMsg('Error grading game') }
   }
 
+  const lockGame = async (roundKey: string, matchupKey: string, locked: boolean) => {
+    setBracketMsg('')
+    try {
+      const res = await fetch('/api/admin/survivor-bracket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'lock_game', roundKey, matchupKey, locked }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        if (data.bracketData) setBracketData(data.bracketData)
+        setBracketMsg(data.message || (locked ? 'Game locked' : 'Game unlocked'))
+      } else {
+        setBracketMsg(data.error || 'Failed to lock game')
+      }
+    } catch { setBracketMsg('Error locking game') }
+  }
+
   // Official Survivor test entry
   const loadAllEntries = async () => {
     setEntriesLoading(true)
@@ -2422,6 +2440,7 @@ export default function AdminPage() {
                 onConfirm={confirmBracket as never}
                 onLoadTeams={loadBracketTeams}
                 onGradeGame={gradeGame}
+                onLockGame={lockGame}
               />
               {bracketMsg && (
                 <div className="text-xs px-3 py-2 rounded-lg mt-2" style={{ background: 'rgba(255,255,255,0.05)', color: '#A0A0B0' }}>
@@ -2463,6 +2482,17 @@ export default function AdminPage() {
                         </span>
                       </div>
                       <div className="flex gap-2">
+                        <button
+                          onClick={() => updateRoundState(round.key, 'pending')}
+                          disabled={roundStateLoading === round.key}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                            (roundStates as Record<string, string>)?.[round.key] === 'pending'
+                              ? 'bg-gray-500/40 text-white border border-gray-400/50'
+                              : 'bg-gray-500/10 text-gray-400 border border-gray-500/20 hover:bg-gray-500/20'
+                          }`}
+                        >
+                          Pending
+                        </button>
                         <button
                           onClick={() => updateRoundState(round.key, 'open')}
                           disabled={roundStateLoading === round.key}

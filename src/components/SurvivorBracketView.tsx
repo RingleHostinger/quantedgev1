@@ -195,11 +195,11 @@ export function SurvivorBracketView({ bracketData, activeRound, userPicks, entry
       </button>
 
       {expanded && (
-        <div className="border-t overflow-x-auto p-3" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+        <div className="border-t p-3" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
           {/* Traditional bracket layout: Left side | Final Four/Championship | Right side */}
-          <div className="flex items-start justify-center gap-4 min-w-[800px]">
+          <div className="flex items-start justify-between w-full">
             {/* LEFT SIDE: East + West regions */}
-            <div className="flex gap-3">
+            <div className="flex gap-3 flex-1">
               {/* East Region */}
               <div className="space-y-2">
                 <div className="text-center text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: '#00FFA3' }}>East</div>
@@ -261,7 +261,7 @@ export function SurvivorBracketView({ bracketData, activeRound, userPicks, entry
             </div>
 
             {/* RIGHT SIDE: South + Midwest regions */}
-            <div className="flex gap-3">
+            <div className="flex gap-3 flex-1">
               {/* South Region */}
               <div className="space-y-2">
                 <div className="text-center text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: '#F59E0B' }}>South</div>
