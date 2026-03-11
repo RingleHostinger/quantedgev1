@@ -12,7 +12,7 @@ export async function GET(_req: NextRequest) {
   // Official pool
   const { data: pool } = await supabaseAdmin
     .from('survivor_pools')
-    .select('id, pool_name, is_active')
+    .select('id, pool_name, is_active, round_states')
     .eq('is_official', true)
     .single()
 
@@ -89,5 +89,65 @@ export async function GET(_req: NextRequest) {
     totalEntries: allEntries.length,
     activeEntries: activeEntries.length,
     entryList,
+    roundStates: pool.round_states || { round64: 'open', round32: 'open', sweet16: 'open', elite8: 'open', finalFour: 'open', championship: 'open' },
   })
+}
+
+// POST: Update round states (open/close/grade)
+export async function POST(req: NextRequest) {
+  const session = await getSession()
+  if (!session?.userId || session.role !== 'admin') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  const body = await req.json()
+  const { round_key, state } = body
+
+  if (!round_key || !state) {
+    return NextResponse.json({ error: 'round_key and state are required' }, { status: 400 })
+  }
+
+  const validStates = ['open', 'closed', 'graded']
+  if (!validStates.includes(state)) {
+    return NextResponse.json({ error: 'state must be open, closed, or graded' }, { status: 400 })
+  }
+
+  const validRoundKeys = ['round64', 'round32', 'sweet16', 'elite8', 'finalFour', 'championship']
+  if (!validRoundKeys.includes(round_key)) {
+    return NextResponse.json({ error: 'Invalid round_key' }, { status: 400 })
+  }
+
+  // Get official pool
+  const { data: pool } = await supabaseAdmin
+    .from('survivor_pools')
+    .select('round_states')
+    .eq('is_official', true)
+    .single()
+
+  if (!pool) {
+    return NextResponse.json({ error: 'Official pool not found' }, { status: 404 })
+  }
+
+  const currentStates = (pool.round_states as Record<string, string>) || {
+    round64: 'open',
+    round32: 'open',
+    sweet16: 'open',
+    elite8: 'open',
+    finalFour: 'open',
+    championship: 'open',
+  }
+
+  // Update the specific round
+  currentStates[round_key] = state
+
+  const { error } = await supabaseAdmin
+    .from('survivor_pools')
+    .update({ round_states: currentStates })
+    .eq('is_official', true)
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  return NextResponse.json({ success: true, round_states: currentStates })
 }

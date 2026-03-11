@@ -40,7 +40,7 @@ interface User {
   created_at: string
 }
 
-type Tab = 'overview' | 'games' | 'predictions' | 'free-pick' | 'users' | 'visibility' | 'briefing' | 'injuries-admin' | 'overrides' | 'bracket-model' | 'bracket-mgmt' | 'pipeline' | 'grading' | 'survivor-test' | 'survivor-grading' | 'official-contest'
+type Tab = 'overview' | 'games' | 'predictions' | 'free-pick' | 'users' | 'visibility' | 'briefing' | 'injuries-admin' | 'overrides' | 'bracket-model' | 'bracket-mgmt' | 'pipeline' | 'grading' | 'survivor-grading' | 'official-contest'
 
 interface PipelineStatus {
   lastOddsRefresh: string | null
@@ -209,6 +209,18 @@ export default function AdminPage() {
   }>>([])
   const [entriesLoading, setEntriesLoading] = useState(false)
 
+  // Round state management
+  const [roundStates, setRoundStates] = useState<Record<string, string>>({
+    round64: 'open',
+    round32: 'open',
+    sweet16: 'open',
+    elite8: 'open',
+    finalFour: 'open',
+    championship: 'open',
+  })
+  const [roundStateLoading, setRoundStateLoading] = useState<string | null>(null)
+  const [roundStateMsg, setRoundStateMsg] = useState('')
+
   // Survivor grading
   interface SurvivorPickAdmin {
     id: string
@@ -320,6 +332,27 @@ export default function AdminPage() {
     finally { setSurvivorTestLoading(false) }
   }
 
+  // Update round state (open/closed/graded)
+  const updateRoundState = async (roundKey: string, state: string) => {
+    setRoundStateLoading(roundKey)
+    setRoundStateMsg('')
+    try {
+      const res = await fetch('/api/admin/official-contest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ round_key: roundKey, state }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setRoundStates(data.round_states)
+        setRoundStateMsg(`${roundKey} is now ${state}`)
+      } else {
+        setRoundStateMsg('Failed to update round state.')
+      }
+    } catch { setRoundStateMsg('Error updating round state.') }
+    finally { setRoundStateLoading(null) }
+  }
+
   // Official Survivor bracket management
   const loadBracketData = async () => {
     setBracketLoading(true)
@@ -335,6 +368,15 @@ export default function AdminPage() {
       }
     } catch { setBracketMsg('Error loading bracket') }
     finally { setBracketLoading(false) }
+
+    // Also load round states
+    try {
+      const res = await fetch('/api/admin/official-contest')
+      const data = await res.json()
+      if (res.ok && data.roundStates) {
+        setRoundStates(data.roundStates)
+      }
+    } catch { /* ignore round state load error */ }
   }
 
   const saveBracketData = async (data: Record<string, unknown>) => {
@@ -766,7 +808,6 @@ export default function AdminPage() {
     { id: 'overrides', label: 'Overrides', icon: Target },
     { id: 'bracket-model', label: 'Bracket Model', icon: FlaskConical },
     { id: 'bracket-mgmt', label: 'Bracket Mgmt', icon: Star },
-    { id: 'survivor-test', label: 'Survivor Test', icon: FlaskConical },
     { id: 'survivor-grading', label: 'Survivor Grading', icon: Trophy },
     { id: 'official-contest', label: 'Official Contest', icon: DollarSign },
     { id: 'users', label: 'Users', icon: Users },
@@ -2367,9 +2408,9 @@ export default function AdminPage() {
             <div className="space-y-5">
               {/* Header */}
               <div>
-                <h2 className="text-lg font-bold text-white">Official Survivor — Bracket & Testing</h2>
+                <h2 className="text-lg font-bold text-white">Official Survivor — Contest Control</h2>
                 <p className="text-sm mt-0.5" style={{ color: '#A0A0B0' }}>
-                  Manage the official tournament bracket, create test entries, and control testing mode.
+                  Manage bracket setup and control round states. All users can now create entries for free.
                 </p>
               </div>
 
@@ -2388,48 +2429,81 @@ export default function AdminPage() {
                 </div>
               )}
 
-              {/* Test Entry Creation */}
+              {/* Round State Controls */}
               <div className="glass-card rounded-2xl p-5">
-                <h3 className="text-sm font-bold mb-1" style={{ color: '#E6E6FA' }}>Create Test Entry (Admin Only)</h3>
+                <h3 className="text-sm font-bold mb-4" style={{ color: '#E6E6FA' }}>Round Controls</h3>
                 <p className="text-xs mb-4" style={{ color: '#A0A0B0' }}>
-                  Create a free test entry that is excluded from all public stats and leaderboards.
+                  Control whether users can make picks for each round. Graded rounds are locked and cannot be changed.
                 </p>
 
-                <div className="flex gap-3 flex-wrap items-end">
-                  <div className="flex-1 min-w-[200px]">
-                    <label className="text-xs block mb-1.5" style={{ color: '#A0A0B0' }}>User ID</label>
-                    <input
-                      value={testEntryUserId}
-                      onChange={(e) => setTestEntryUserId(e.target.value)}
-                      placeholder="Enter user UUID"
-                      className="w-full rounded-lg px-3 py-2 text-sm text-white"
-                      style={{ background: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)' }}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs block mb-1.5" style={{ color: '#A0A0B0' }}>Entry #</label>
-                    <select
-                      value={testEntryNumber}
-                      onChange={(e) => setTestEntryNumber(parseInt(e.target.value))}
-                      className="rounded-lg px-3 py-2 text-sm text-white"
-                      style={{ background: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)' }}
-                    >
-                      {[1, 2, 3].map(n => <option key={n} value={n}>{n}</option>)}
-                    </select>
-                  </div>
-                  <button
-                    onClick={createTestEntry}
-                    disabled={testEntryLoading || !testEntryUserId.trim()}
-                    className="px-5 py-2 rounded-xl text-sm font-bold transition-all hover:opacity-80 disabled:opacity-40"
-                    style={{ background: 'rgba(245,158,11,0.12)', color: '#F59E0B', border: '1px solid rgba(245,158,11,0.25)' }}
-                  >
-                    {testEntryLoading ? 'Creating...' : 'Create Test Entry'}
-                  </button>
+                <div className="space-y-3">
+                  {[
+                    { key: 'round64', label: 'Round of 64' },
+                    { key: 'round32', label: 'Round of 32' },
+                    { key: 'sweet16', label: 'Sweet 16' },
+                    { key: 'elite8', label: 'Elite Eight' },
+                    { key: 'finalFour', label: 'Final Four' },
+                    { key: 'championship', label: 'Championship' },
+                  ].map((round) => (
+                    <div key={round.key} className="flex items-center justify-between p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-medium" style={{ color: '#E6E6FA' }}>{round.label}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${
+                          (roundStates as Record<string, string>)?.[round.key] === 'graded'
+                            ? 'bg-red-500/20 text-red-400'
+                            : (roundStates as Record<string, string>)?.[round.key] === 'closed'
+                            ? 'bg-yellow-500/20 text-yellow-400'
+                            : 'bg-green-500/20 text-green-400'
+                        }`}>
+                          {(roundStates as Record<string, string>)?.[round.key] === 'graded'
+                            ? 'GRADED'
+                            : (roundStates as Record<string, string>)?.[round.key] === 'closed'
+                            ? 'LOCKED'
+                            : 'OPEN'}
+                        </span>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => updateRoundState(round.key, 'open')}
+                          disabled={roundStateLoading === round.key}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                            (roundStates as Record<string, string>)?.[round.key] === 'open'
+                              ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                              : 'bg-gray-500/10 text-gray-400 border border-gray-500/20 hover:bg-green-500/10'
+                          }`}
+                        >
+                          Open
+                        </button>
+                        <button
+                          onClick={() => updateRoundState(round.key, 'closed')}
+                          disabled={roundStateLoading === round.key}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                            (roundStates as Record<string, string>)?.[round.key] === 'closed'
+                              ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+                              : 'bg-gray-500/10 text-gray-400 border border-gray-500/20 hover:bg-yellow-500/10'
+                          }`}
+                        >
+                          Lock
+                        </button>
+                        <button
+                          onClick={() => updateRoundState(round.key, 'graded')}
+                          disabled={roundStateLoading === round.key}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                            (roundStates as Record<string, string>)?.[round.key] === 'graded'
+                              ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                              : 'bg-gray-500/10 text-gray-400 border border-gray-500/20 hover:bg-red-500/10'
+                          }`}
+                        >
+                          Grade
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
 
-                {testEntryMsg && (
-                  <div className="mt-3 text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.05)', color: '#A0A0B0' }}>
-                    {testEntryMsg}
+                {roundStateMsg && (
+                  <div className="mt-4 text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.05)', color: '#A0A0B0' }}>
+                    {roundStateMsg}
                   </div>
                 )}
               </div>
@@ -2437,7 +2511,7 @@ export default function AdminPage() {
               {/* Entries List */}
               <div className="glass-card rounded-2xl overflow-hidden">
                 <div className="p-4 border-b flex items-center justify-between" style={{ borderColor: 'rgba(255,255,255,0.07)' }}>
-                  <h3 className="text-sm font-semibold" style={{ color: '#E6E6FA' }}>All Entries (Including Test)</h3>
+                  <h3 className="text-sm font-semibold" style={{ color: '#E6E6FA' }}>All Entries</h3>
                   <button
                     onClick={loadAllEntries}
                     disabled={entriesLoading}
@@ -2473,36 +2547,6 @@ export default function AdminPage() {
                         <div className="text-xs" style={{ color: '#6B6B80' }}>{entry.userEmail}</div>
                       </div>
                     ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Testing Mode Toggle */}
-              <div className="glass-card rounded-2xl p-5">
-                <h3 className="text-sm font-bold mb-4" style={{ color: '#E6E6FA' }}>Testing Mode</h3>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-sm font-medium" style={{ color: '#E6E6FA' }}>Enable Testing Mode</div>
-                    <div className="text-xs mt-0.5" style={{ color: '#6B6B80' }}>
-                      When enabled, Official Survivor page becomes accessible for testing
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => toggleSurvivorTestMode(!survivorTestMode)}
-                    disabled={survivorTestLoading}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all disabled:opacity-50"
-                    style={survivorTestMode
-                      ? { background: 'rgba(255,107,107,0.12)', color: '#FF6B6B', border: '1px solid rgba(255,107,107,0.3)' }
-                      : { background: 'rgba(0,255,163,0.12)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.3)' }
-                    }
-                  >
-                    <FlaskConical className="w-4 h-4" />
-                    {survivorTestLoading ? 'Updating...' : survivorTestMode ? 'Disable' : 'Enable'}
-                  </button>
-                </div>
-                {survivorTestMsg && (
-                  <div className="mt-3 text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.05)', color: '#A0A0B0' }}>
-                    {survivorTestMsg}
                   </div>
                 )}
               </div>

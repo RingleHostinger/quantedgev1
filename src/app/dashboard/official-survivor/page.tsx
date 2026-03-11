@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import {
-  Trophy, CheckCircle, XCircle, AlertCircle,
+  Trophy, CheckCircle, XCircle, AlertCircle, Lock, Unlock,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useSidebarCollapse } from '@/hooks/useSidebarCollapse'
@@ -58,6 +58,7 @@ interface OfficialData {
   roundCompletionStatus?: Record<string, { total: number; completed: number; allDone: boolean }>
   activeRound?: number
   isAdmin?: boolean
+  roundStates?: Record<string, string>
 }
 
 // ─── Main Component ────────────────────────────────────────────────────────
@@ -157,6 +158,28 @@ export default function OfficialSurvivorPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'create_test_entry', entry_number: entryNumber }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || 'Failed to create entry')
+      }
+      // Refresh data
+      fetchData()
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to create entry')
+    } finally {
+      setCreatingEntry(false)
+    }
+  }
+
+  // Create free entry (for regular users)
+  const createEntry = async () => {
+    setCreatingEntry(true)
+    try {
+      const res = await fetch('/api/survivor/official', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create_entry' }),
       })
       if (!res.ok) {
         const err = await res.json()
@@ -276,6 +299,21 @@ export default function OfficialSurvivorPage() {
   // Get user's picks for bracket highlighting
   const userPicks = currentEntry?.picks ?? []
 
+  // Get round states
+  const roundStates = data?.roundStates || {
+    round64: 'open',
+    round32: 'open',
+    sweet16: 'open',
+    elite8: 'open',
+    finalFour: 'open',
+    championship: 'open',
+  }
+
+  // Check if current round is locked
+  const currentRoundKey = roundNumberToKey[activeRound]
+  const currentRoundState = currentRoundKey ? roundStates[currentRoundKey] : 'open'
+  const isCurrentRoundLocked = currentRoundState === 'closed' || currentRoundState === 'graded'
+
   return (
     <div className="px-4 lg:px-6 py-6 max-w-7xl mx-auto space-y-4">
       {/* Advancement/Elimination Popup */}
@@ -313,6 +351,23 @@ export default function OfficialSurvivorPage() {
             <h1 className="text-xl font-bold" style={{ color: '#E6E6FA' }}>Official Survivor</h1>
             <p className="text-xs" style={{ color: '#6B6B80' }}>{totalEntrants} entrants · {aliveEntrants} alive</p>
           </div>
+        </div>
+
+        {/* Round Status */}
+        <div className="flex items-center gap-2">
+          {Object.entries(roundStates).map(([key, state]) => (
+            <span
+              key={key}
+              className="text-xs px-2 py-1 rounded font-medium"
+              style={{
+                background: state === 'graded' ? 'rgba(239,68,68,0.15)' : state === 'closed' ? 'rgba(250,204,21,0.15)' : 'rgba(0,255,163,0.15)',
+                color: state === 'graded' ? '#EF4444' : state === 'closed' ? '#EAB308' : '#22C55E',
+              }}
+              title={`${key}: ${state}`}
+            >
+              {key === 'round64' ? 'R64' : key === 'round32' ? 'R32' : key === 'sweet16' ? 'S16' : key === 'elite8' ? 'E8' : key === 'finalFour' ? 'F4' : 'CH'}:{state === 'graded' ? 'X' : state === 'closed' ? '-' : '✓'}
+            </span>
+          ))}
         </div>
         <div className="text-right">
           <p className="text-xs" style={{ color: '#6B6B80' }}>Round</p>
@@ -415,20 +470,31 @@ export default function OfficialSurvivorPage() {
               <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: '#6B6B80' }}>
                 Make Your Pick - {ROUND_LABELS[activeRoundKey]}
               </h2>
+
+              {/* Round Status Banner */}
+              {isCurrentRoundLocked && (
+                <div className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl mb-4" style={{ background: currentRoundState === 'graded' ? 'rgba(239,68,68,0.1)' : 'rgba(250,204,21,0.1)', border: `1px solid ${currentRoundState === 'graded' ? 'rgba(239,68,68,0.3)' : 'rgba(250,204,21,0.3)'}` }}>
+                  <Lock className="w-4 h-4" style={{ color: currentRoundState === 'graded' ? '#EF4444' : '#EAB308' }} />
+                  <span className="text-sm font-medium" style={{ color: currentRoundState === 'graded' ? '#EF4444' : '#EAB308' }}>
+                    {currentRoundState === 'graded' ? 'Round Graded - Picks Locked' : 'Round Closed - Picks Locked'}
+                  </span>
+                </div>
+              )}
+
               <RoundGameCards
                 roundKey={activeRoundKey}
                 roundNumber={activeRound}
                 matchups={activeRoundMatchups}
                 selectedTeam={currentPick?.teamName ?? existingPick?.team_name}
                 usedTeams={userPicks.map(p => p.team_name)}
-                isLocked={false}
+                isLocked={isCurrentRoundLocked}
                 isEliminated={isEntryEliminated}
-                onTeamSelect={handleTeamSelect}
+                onTeamSelect={isCurrentRoundLocked ? undefined : handleTeamSelect}
               />
 
               {/* Save Button */}
               <div className="flex flex-col gap-2">
-                {hasPendingPick && (
+                {hasPendingPick && !isCurrentRoundLocked && (
                   <Button
                     onClick={handleSavePick}
                     disabled={saving}
@@ -441,6 +507,11 @@ export default function OfficialSurvivorPage() {
                 {hasSubmittedPick && !hasPendingPick && (
                   <p className="text-xs text-center" style={{ color: '#6B6B80' }}>
                     Pick submitted for this round
+                  </p>
+                )}
+                {isCurrentRoundLocked && existingPick && (
+                  <p className="text-xs text-center" style={{ color: currentRoundState === 'graded' ? '#EF4444' : '#EAB308' }}>
+                    {currentRoundState === 'graded' ? 'Round has been graded' : 'Round is locked - picks cannot be changed'}
                   </p>
                 )}
                 {!hasSubmittedPick && !hasPendingPick && (
@@ -494,7 +565,16 @@ export default function OfficialSurvivorPage() {
           )}
 
           {!isAdmin && (
-            <p className="text-sm" style={{ color: '#A0A0B0' }}>Entry purchase coming soon. Check back later!</p>
+            <div className="space-y-4">
+              <p className="text-sm" style={{ color: '#A0A0B0' }}>Join the Official Survivor contest - free to enter!</p>
+              <Button
+                onClick={createEntry}
+                disabled={creatingEntry}
+                style={{ background: 'rgba(0,255,163,0.12)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.25)' }}
+              >
+                {creatingEntry ? 'Creating...' : 'Create My Entry'}
+              </Button>
+            </div>
           )}
         </div>
       )}

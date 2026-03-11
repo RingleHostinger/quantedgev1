@@ -18,6 +18,7 @@ interface OfficialEntry {
   entry_number: number
   status: 'active' | 'refunded'
   created_at: string
+  is_test_entry?: boolean
 }
 
 interface SurvivorPick {
@@ -44,7 +45,7 @@ export async function GET(_req: NextRequest) {
   // Official pool
   const { data: pool, error: poolErr } = await supabaseAdmin
     .from('survivor_pools')
-    .select('id, pool_name, pool_size, pick_format, team_reuse, strike_rule, is_active, created_at, bracket_data, bracket_confirmed')
+    .select('id, pool_name, pool_size, pick_format, team_reuse, strike_rule, is_active, created_at, bracket_data, bracket_confirmed, round_states')
     .eq('is_official', true)
     .single()
 
@@ -54,7 +55,7 @@ export async function GET(_req: NextRequest) {
 
   const officialPoolId = pool.id
 
-  // All entries for this pool (exclude test entries from public stats)
+  // All entries for this pool
   const { data: allEntries } = await supabaseAdmin
     .from('official_survivor_entries')
     .select('id, user_id, entry_number, status, created_at, is_test_entry')
@@ -62,12 +63,15 @@ export async function GET(_req: NextRequest) {
     .eq('status', 'active')
     .order('created_at', { ascending: true })
 
-  // Separate real entries from test entries - test entries excluded from public stats
+  // Separate real entries from test entries
   const allEntriesList = (allEntries ?? []) as OfficialEntry[]
-  const realEntries = allEntriesList.filter(e => !(e as Record<string, unknown>).is_test_entry)
+  const realEntries = allEntriesList.filter(e => !e.is_test_entry)
 
   // Public stats only include real entries
   const entries: OfficialEntry[] = realEntries
+
+  // Include test entries for admin users
+  const testEntries = allEntriesList.filter(e => e.is_test_entry === true)
 
   // All picks linked to this pool's entries (real entries)
   const entryIds = entries.map((e) => e.id)
@@ -80,6 +84,21 @@ export async function GET(_req: NextRequest) {
       .order('round_number', { ascending: true })
     picks = (pickRows ?? []) as SurvivorPick[]
   }
+
+  // Also fetch picks for test entries
+  const testEntryIds = testEntries.map((e) => e.id)
+  let testPicks: SurvivorPick[] = []
+  if (testEntryIds.length > 0) {
+    const { data: testPickRows } = await supabaseAdmin
+      .from('survivor_picks')
+      .select('id, official_entry_id, user_id, round_number, team_name, team_seed, opponent_name, result, picked_at, updated_at')
+      .in('official_entry_id', testEntryIds)
+      .order('round_number', { ascending: true })
+    testPicks = (testPickRows ?? []) as SurvivorPick[]
+  }
+
+  // Combine all picks
+  const allPicks = [...picks, ...testPicks]
 
   // User display names for all entrants
   const entrantIds = [...new Set(entries.map((e) => e.user_id))]
@@ -101,7 +120,7 @@ export async function GET(_req: NextRequest) {
 
   // Build leaderboard — one row per entry
   const picksByEntry: Record<string, SurvivorPick[]> = {}
-  for (const p of picks) {
+  for (const p of allPicks) {
     if (!p.official_entry_id) continue
     if (!picksByEntry[p.official_entry_id]) picksByEntry[p.official_entry_id] = []
     picksByEntry[p.official_entry_id].push(p)
@@ -146,8 +165,10 @@ export async function GET(_req: NextRequest) {
     return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
   }).map((row, idx) => ({ rank: idx + 1, ...row }))
 
-  // My entries
-  let myEntries = entries.filter((e) => e.user_id === session.userId)
+  // My entries - include both real entries and test entries for the user
+  const myRealEntries = entries.filter((e) => e.user_id === session.userId)
+  const myTestEntries = testEntries.filter((e) => e.user_id === session.userId)
+  let myEntries = [...myRealEntries, ...myTestEntries]
 
   const myEntryCount = myEntries.length
 
@@ -185,9 +206,46 @@ export async function GET(_req: NextRequest) {
 
   const isAdmin = currentUser?.role === 'admin'
 
+  // Build test leaderboard entries for the current user
+  const testLeaderboardRows = myTestEntries.map((entry) => {
+    const entryPicks = picksByEntry[entry.id] ?? []
+    let entryStatus: 'alive' | 'eliminated' = 'alive'
+    let roundsSurvived = 0
+    let picksCorrect = 0
+
+    for (const pick of entryPicks) {
+      if (pick.result === 'won') {
+        roundsSurvived = Math.max(roundsSurvived, pick.round_number)
+        picksCorrect++
+      } else if (pick.result === 'eliminated') {
+        entryStatus = 'eliminated'
+        roundsSurvived = pick.round_number - 1
+      }
+    }
+
+    return {
+      entryId: entry.id,
+      userId: entry.user_id,
+      entryNumber: entry.entry_number,
+      displayName: userMap[entry.user_id]?.name ?? 'Unknown',
+      status: entryStatus,
+      roundsSurvived,
+      picksCorrect,
+      currentRound,
+      picks: entryPicks,
+      createdAt: entry.created_at,
+    }
+  })
+
+  // Combine user's real entries and test entries
+  const myLeaderboardRows = [
+    ...leaderboard.filter((r) => r.userId === session.userId),
+    ...testLeaderboardRows,
+  ]
+
   return NextResponse.json({
     pool,
-    myEntries: leaderboard.filter((r) => r.userId === session.userId),
+    myEntries: myLeaderboardRows,
     leaderboard,
     currentRound,
     totalEntrants: entries.length,
@@ -195,6 +253,7 @@ export async function GET(_req: NextRequest) {
     roundCompletionStatus,
     activeRound,
     isAdmin,
+    roundStates: pool.round_states || { round64: 'open', round32: 'open', sweet16: 'open', elite8: 'open', finalFour: 'open', championship: 'open' },
   })
 }
 
@@ -269,6 +328,56 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, entry })
   }
 
+  // Handle free entry creation (for regular users - no payment required)
+  if (body.action === 'create_entry') {
+    // Get official pool
+    const { data: pool } = await supabaseAdmin
+      .from('survivor_pools')
+      .select('id')
+      .eq('is_official', true)
+      .single()
+
+    if (!pool) {
+      return NextResponse.json({ error: 'Official pool not found' }, { status: 404 })
+    }
+
+    // Check how many entries this user already has
+    const { data: existingEntries } = await supabaseAdmin
+      .from('official_survivor_entries')
+      .select('entry_number')
+      .eq('pool_id', pool.id)
+      .eq('user_id', session.userId)
+
+    const usedNumbers = new Set((existingEntries ?? []).map(e => e.entry_number))
+    let entryNumber = 1
+    while (usedNumbers.has(entryNumber) && entryNumber <= 10) {
+      entryNumber++
+    }
+
+    if (usedNumbers.has(entryNumber)) {
+      return NextResponse.json({ error: 'You already have the maximum number of entries' }, { status: 400 })
+    }
+
+    // Create free entry (not a test entry)
+    const { data: entry, error } = await supabaseAdmin
+      .from('official_survivor_entries')
+      .insert({
+        pool_id: pool.id,
+        user_id: session.userId,
+        entry_number: entryNumber,
+        status: 'active',
+        is_test_entry: false,
+      })
+      .select()
+      .single()
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    return NextResponse.json({ success: true, entry })
+  }
+
   const { entry_id, round_number, team_name, team_seed, opponent_name, opponent_seed, win_probability, ai_confidence } = body
 
   if (!entry_id || !round_number || !team_name) {
@@ -289,15 +398,36 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'This entry is no longer active' }, { status: 400 })
   }
 
-  // Fetch the official pool to check is_active
+  // Fetch the official pool to check is_active and round states
   const { data: pool } = await supabaseAdmin
     .from('survivor_pools')
-    .select('id, is_active')
+    .select('id, is_active, round_states')
     .eq('id', entry.pool_id)
     .single()
 
   if (!pool?.is_active) {
     return NextResponse.json({ error: 'Official pool is closed' }, { status: 400 })
+  }
+
+  // Map round number to round key
+  const roundNumberToKey: Record<number, string> = {
+    1: 'round64',
+    2: 'round32',
+    3: 'sweet16',
+    4: 'elite8',
+    5: 'finalFour',
+    6: 'championship',
+  }
+  const roundKey = roundNumberToKey[round_number]
+  const roundStates = pool.round_states || { round64: 'open', round32: 'open', sweet16: 'open', elite8: 'open', finalFour: 'open', championship: 'open' }
+  const roundState = roundKey ? (roundStates as Record<string, string>)[roundKey] : 'open'
+
+  // Check if round is closed or graded
+  if (roundState === 'graded') {
+    return NextResponse.json({ error: 'This round has been graded and is locked' }, { status: 400 })
+  }
+  if (roundState === 'closed') {
+    return NextResponse.json({ error: 'This round is currently closed for picks' }, { status: 400 })
   }
 
   // Check if this entry has been eliminated
