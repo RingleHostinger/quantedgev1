@@ -62,7 +62,7 @@ export async function GET(_req: NextRequest) {
   // Public stats only include real entries
   const entries: OfficialEntry[] = realEntries
 
-  // All picks linked to this pool's entries
+  // All picks linked to this pool's entries (real entries)
   const entryIds = entries.map((e) => e.id)
   let picks: SurvivorPick[] = []
   if (entryIds.length > 0) {
@@ -72,6 +72,20 @@ export async function GET(_req: NextRequest) {
       .in('official_entry_id', entryIds)
       .order('round_number', { ascending: true })
     picks = (pickRows ?? []) as SurvivorPick[]
+  }
+
+  // For test mode: also fetch picks for test entries
+  let testPicks: SurvivorPick[] = []
+  const testEntryIds = allEntriesList
+    .filter((e) => (e as Record<string, unknown>).is_test_entry === true)
+    .map((e) => e.id)
+  if (testEntryIds.length > 0) {
+    const { data: testPickRows } = await supabaseAdmin
+      .from('survivor_picks')
+      .select('id, official_entry_id, user_id, round_number, team_name, team_seed, opponent_name, result, picked_at, updated_at')
+      .in('official_entry_id', testEntryIds)
+      .order('round_number', { ascending: true })
+    testPicks = (testPickRows ?? []) as SurvivorPick[]
   }
 
   // User display names for all entrants
@@ -139,14 +153,6 @@ export async function GET(_req: NextRequest) {
     return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
   }).map((row, idx) => ({ rank: idx + 1, ...row }))
 
-  // My entries
-  const myEntries = entries.filter((e) => e.user_id === session.userId)
-  const myEntryCount = myEntries.length
-  const myLeaderboardRows = leaderboard.filter((r) => r.userId === session.userId)
-
-  // Prize pool
-  const prizePool = computePrizePool(entries.length)
-
   // Check if current user is admin with test mode enabled → bracketLive bypass
   let bracketLive = false
   let isAdmin = false
@@ -182,6 +188,95 @@ export async function GET(_req: NextRequest) {
     }
   }
 
+  // My entries
+  // For test mode: also include test entries for admin preview
+  let myEntries = entries.filter((e) => e.user_id === session.userId)
+  let isTestMode = false
+
+  // If admin with test mode enabled, also include test entries for preview
+  if (isAdmin && bracketLive && testBracketData) {
+    isTestMode = true
+    const testEntries = allEntriesList.filter(
+      (e) => e.user_id === session.userId && (e as Record<string, unknown>).is_test_entry === true
+    )
+    // Include test entries in myEntries for preview
+    myEntries = [...myEntries, ...testEntries]
+  }
+
+  const myEntryCount = myEntries.length
+
+  // Build leaderboard rows for test entries (for preview)
+  let testLeaderboardRows: Array<{
+    rank: number
+    entryId: string
+    userId: string
+    entryNumber: number
+    displayName: string
+    status: 'alive' | 'eliminated'
+    roundsSurvived: number
+    picksCorrect: number
+    currentRound: number
+    picks: SurvivorPick[]
+    createdAt: string
+  }> = []
+
+  if (isTestMode && testPicks.length > 0) {
+    const testPicksByEntry: Record<string, SurvivorPick[]> = {}
+    for (const p of testPicks) {
+      if (!p.official_entry_id) continue
+      if (!testPicksByEntry[p.official_entry_id]) testPicksByEntry[p.official_entry_id] = []
+      testPicksByEntry[p.official_entry_id].push(p)
+    }
+
+    const testEntriesMap = new Map(
+      allEntriesList
+        .filter((e) => e.user_id === session.userId && (e as Record<string, unknown>).is_test_entry === true)
+        .map((e) => [e.id, e])
+    )
+
+    testLeaderboardRows = myEntries
+      .filter((e) => (e as Record<string, unknown>).is_test_entry === true)
+      .map((entry) => {
+        const entryPicks = testPicksByEntry[entry.id] ?? []
+        let entryStatus: 'alive' | 'eliminated' = 'alive'
+        let roundsSurvived = 0
+        let picksCorrect = 0
+
+        for (const pick of entryPicks) {
+          if (pick.result === 'won') {
+            roundsSurvived = Math.max(roundsSurvived, pick.round_number)
+            picksCorrect++
+          } else if (pick.result === 'eliminated') {
+            entryStatus = 'eliminated'
+            roundsSurvived = pick.round_number - 1
+          }
+        }
+
+        return {
+          entryId: entry.id,
+          userId: entry.user_id,
+          entryNumber: entry.entry_number,
+          displayName: userMap[entry.user_id]?.name ?? 'Unknown',
+          status: entryStatus,
+          roundsSurvived,
+          picksCorrect,
+          currentRound,
+          picks: entryPicks,
+          createdAt: entry.created_at,
+          isTestEntry: true,
+        }
+      })
+  }
+
+  // Combine real leaderboard rows with test leaderboard rows for preview
+  const myLeaderboardRows = [
+    ...leaderboard.filter((r) => r.userId === session.userId),
+    ...testLeaderboardRows,
+  ]
+
+  // Prize pool
+  const prizePool = computePrizePool(entries.length)
+
   return NextResponse.json({
     pool,
     myEntries: myLeaderboardRows,
@@ -194,6 +289,7 @@ export async function GET(_req: NextRequest) {
     prizePool,
     bracketLive,
     isAdmin,
+    isTestMode,
     testBracketData,
   })
 }
