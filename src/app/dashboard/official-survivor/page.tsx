@@ -67,6 +67,8 @@ interface OfficialData {
   prizePool: PrizePool
   bracketLive?: boolean
   isAdmin?: boolean
+  isTestMode?: boolean
+  testBracketData?: unknown
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -281,7 +283,8 @@ function OfficialSurvivorInner() {
   const [activeTab, setActiveTab] = useState<'leaderboard' | 'my-entries' | 'rules'>('leaderboard')
 
   const bracketLive = new Date() >= BRACKET_RELEASE || (data?.bracketLive === true)
-  const isTestMode = data?.isAdmin === true && data?.bracketLive === true && new Date() < BRACKET_RELEASE
+  // Use isTestMode from API (includes test entries in myEntries for preview)
+  const isTestMode = data?.isTestMode === true
 
   const fetchData = useCallback(async () => {
     try {
