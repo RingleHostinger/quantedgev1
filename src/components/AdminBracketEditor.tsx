@@ -29,6 +29,7 @@ interface AdminBracketEditorProps {
   onConfirm: (data: OfficialBracketData) => Promise<void>
   onLoadTeams: () => Promise<Record<string, BracketTeam[]> | null>
   onGradeGame: (roundKey: string, matchupKey: string, winner: string) => Promise<void>
+  onSaveTestPreview?: (data: OfficialBracketData) => Promise<void>
 }
 
 // Constants
@@ -353,6 +354,33 @@ export default function AdminBracketEditor({
     setShowConfirmDialog(true)
   }
 
+  // Handle save test preview (for admin testing without locking live bracket)
+  const handleSaveTestPreview = async () => {
+    // Validate but don't require completeness for test preview
+    const validation = validateAllTeams()
+    if (!validation.valid) {
+      setMessage({ type: 'error', text: `Cannot save test preview: ${validation.errors.join(', ')}` })
+      return
+    }
+
+    if (!onSaveTestPreview) {
+      setMessage({ type: 'error', text: 'Test preview not available' })
+      return
+    }
+
+    setSaving(true)
+    setMessage(null)
+    try {
+      await onSaveTestPreview({ regions, results })
+      setMessage({ type: 'success', text: 'Test bracket saved! Enable test mode to preview as a user.' })
+    } catch (error) {
+      console.error('Failed to save test preview:', error)
+      setMessage({ type: 'error', text: 'Failed to save test preview' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const handleConfirm = async () => {
     setConfirming(true)
     setShowConfirmDialog(false)
@@ -610,6 +638,17 @@ export default function AdminBracketEditor({
             <Save className="w-4 h-4" />
             {saving ? 'Saving...' : 'Save Draft'}
           </button>
+          {onSaveTestPreview && (
+            <button
+              onClick={handleSaveTestPreview}
+              disabled={saving}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all hover:opacity-80 disabled:opacity-50"
+              style={{ background: 'rgba(245,158,11,0.15)', color: '#F59E0B', border: '1px solid rgba(245,158,11,0.3)' }}
+            >
+              <Eye className="w-4 h-4" />
+              Preview Test
+            </button>
+          )}
           <button
             onClick={handleConfirmClick}
             disabled={confirming}

@@ -150,6 +150,7 @@ export async function GET(_req: NextRequest) {
   // Check if current user is admin with test mode enabled → bracketLive bypass
   let bracketLive = false
   let isAdmin = false
+  let testBracketData = null
 
   const { data: currentUser } = await supabaseAdmin
     .from('users')
@@ -166,6 +167,18 @@ export async function GET(_req: NextRequest) {
       .single()
     if (testModeSetting?.value === 'true') {
       bracketLive = true
+
+      // Load test bracket data for admin preview
+      const { data: testBracketSetting } = await supabaseAdmin
+        .from('admin_settings')
+        .select('value')
+        .eq('key', 'survivor_test_bracket_data')
+        .single()
+      if (testBracketSetting?.value) {
+        try {
+          testBracketData = JSON.parse(testBracketSetting.value)
+        } catch { /* ignore parse errors */ }
+      }
     }
   }
 
@@ -181,6 +194,7 @@ export async function GET(_req: NextRequest) {
     prizePool,
     bracketLive,
     isAdmin,
+    testBracketData,
   })
 }
 

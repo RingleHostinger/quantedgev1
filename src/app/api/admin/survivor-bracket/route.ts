@@ -323,6 +323,34 @@ export async function POST(req: NextRequest) {
     })
   }
 
+  // Action: save_test_preview - Save test bracket for admin preview without locking live bracket
+  if (action === 'save_test_preview') {
+    // Save test bracket data to admin_settings (separate from live bracket)
+    const { error: testSaveErr } = await supabaseAdmin
+      .from('admin_settings')
+      .upsert({
+        key: 'survivor_test_bracket_data',
+        value: JSON.stringify(bracketData),
+        updated_at: new Date().toISOString()
+      })
+
+    if (testSaveErr) {
+      return NextResponse.json({ error: testSaveErr.message }, { status: 500 })
+    }
+
+    // Also enable test mode so admin can see the preview
+    await supabaseAdmin
+      .from('admin_settings')
+      .upsert({ key: 'survivor_test_mode', value: 'true', updated_at: new Date().toISOString() })
+
+    return NextResponse.json({
+      success: true,
+      message: 'Test bracket saved. Admin can now preview the full bracket experience in test mode.',
+      isTestMode: true,
+      bracketData,
+    })
+  }
+
   // Just save/update bracket data
   const { error: updateError } = await supabaseAdmin
     .from('survivor_pools')

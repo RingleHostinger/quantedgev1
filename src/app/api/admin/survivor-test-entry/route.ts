@@ -60,6 +60,9 @@ export async function POST(req: NextRequest) {
       entry_number: entryNumber,
       status: 'active',
       is_test_entry: true, // Mark as test entry
+      // Placeholder values for test entries (payment fields nullable now)
+      ls_order_id: `test_entry_${crypto.randomUUID()}`,
+      amount_paid: null,
     })
     .select()
     .single()
