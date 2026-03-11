@@ -579,6 +579,69 @@ function OfficialSurvivorInner() {
         hasSubmittedPick={hasSubmittedPick}
       />
 
+      {/* Entry Selector Dropdown - shown when user has entries */}
+      {myEntries.length > 0 && (
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-semibold" style={{ color: '#6B6B80' }}>Viewing Entry:</span>
+          <select
+            value={activeEntryIndex}
+            onChange={(e) => {
+              setActiveEntryIndex(Number(e.target.value))
+              setSaveError(null)
+              setSaveSuccess(null)
+            }}
+            className="px-3 py-2 rounded-lg text-xs font-semibold border-0 focus:ring-2"
+            style={{
+              background: 'rgba(0,255,163,0.08)',
+              color: '#00FFA3',
+              border: '1px solid rgba(0,255,163,0.2)',
+              outline: 'none',
+            }}
+          >
+            {myEntries.map((entry, idx) => (
+              <option key={entry.entryId} value={idx}>
+                Entry #{entry.entryNumber} ({entry.status === 'alive' ? 'Alive' : 'Eliminated'})
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Compact My Picks Section - shows user's picks across all rounds */}
+      {myEntries.length > 0 && currentEntry && (
+        <div className="rounded-xl p-3" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+          <div className="flex items-center gap-2 mb-2">
+            <CheckCircle className="w-3.5 h-3.5" style={{ color: '#00FFA3' }} />
+            <span className="text-xs font-bold uppercase tracking-wider" style={{ color: '#6B6B80' }}>
+              My Picks (Entry #{currentEntry.entryNumber})
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {currentEntry.picks && currentEntry.picks.length > 0 ? (
+              currentEntry.picks.map((pick) => (
+                <div
+                  key={pick.round_number}
+                  className="flex items-center gap-2 px-2 py-1 rounded-md text-xs"
+                  style={{
+                    background: pick.result === 'won' ? 'rgba(0,255,163,0.08)' : pick.result === 'eliminated' ? 'rgba(239,68,68,0.08)' : 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${pick.result === 'won' ? 'rgba(0,255,163,0.15)' : pick.result === 'eliminated' ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.06)'}`,
+                  }}
+                >
+                  <span className="font-semibold" style={{ color: '#4A4A60' }}>R{pick.round_number}:</span>
+                  <span className="font-medium" style={{ color: pick.result === 'won' ? '#00FFA3' : pick.result === 'eliminated' ? '#F87171' : '#E6E6FA' }}>
+                    {pick.team_name}
+                  </span>
+                  {pick.result === 'won' && <CheckCircle className="w-3 h-3" style={{ color: '#00FFA3' }} />}
+                  {pick.result === 'eliminated' && <XCircle className="w-3 h-3" style={{ color: '#F87171' }} />}
+                </div>
+              ))
+            ) : (
+              <span className="text-xs" style={{ color: '#4A4A60' }}>No picks made yet</span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Collapsible Bracket View */}
       {bracketData && (
         <SurvivorBracketView

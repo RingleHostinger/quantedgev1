@@ -194,8 +194,10 @@ export async function GET(_req: NextRequest) {
       .single()
     if (testModeSetting?.value === 'true') {
       bracketLive = true
+    }
 
-      // Load test bracket data for admin preview
+    // Load test bracket data for admin preview (when either test mode OR admin preview is enabled)
+    if (bracketLive) {
       const { data: testBracketSetting } = await supabaseAdmin
         .from('admin_settings')
         .select('value')
