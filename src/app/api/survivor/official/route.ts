@@ -431,9 +431,37 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'This round is currently closed for picks' }, { status: 400 })
   }
 
-  // Contest day logic: 1 pick per day, except days 1,2,7,8 allow 2 picks
+  // Contest day to round mapping:
+  // Day 1-2: Round of 64 (double pick days)
+  // Day 3-4: Round of 32
+  // Day 5-6: Sweet 16
+  // Day 7-8: Elite Eight (double pick days)
+  // Day 9: Final Four
+  // Day 10: Championship
+  const contestDayToRound: Record<number, number> = {
+    1: 1, // Round of 64 - Day 1
+    2: 1, // Round of 64 - Day 2
+    3: 2, // Round of 32 - Day 3
+    4: 2, // Round of 32 - Day 4
+    5: 3, // Sweet 16 - Day 5
+    6: 3, // Sweet 16 - Day 6
+    7: 4, // Elite Eight - Day 7
+    8: 4, // Elite Eight - Day 8
+    9: 5, // Final Four - Day 9
+    10: 6, // Championship - Day 10
+  }
+
   const activeContestDay = pool.active_contest_day || 1
-  const doublePickDays = [1, 2, 7, 8] // Days that allow 2 picks
+  const targetRound = contestDayToRound[activeContestDay] || 1
+
+  // User can only make picks for the CURRENT round based on contest day
+  if (round_number !== targetRound) {
+    const roundNames: Record<number, string> = { 1: 'Round of 64', 2: 'Round of 32', 3: 'Sweet 16', 4: 'Elite Eight', 5: 'Final Four', 6: 'Championship' }
+    return NextResponse.json({ error: `Picks for ${roundNames[round_number]} are not open yet. Currently accepting picks for ${roundNames[targetRound]}.` }, { status: 400 })
+  }
+
+  // Double pick days: 1, 2, 7, 8 allow 2 picks
+  const doublePickDays = [1, 2, 7, 8]
   const maxPicksPerDay = doublePickDays.includes(activeContestDay) ? 2 : 1
 
   // Get all existing picks for this entry

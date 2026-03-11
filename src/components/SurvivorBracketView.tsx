@@ -7,6 +7,7 @@ import {
   type BracketMatchup,
   ROUND_KEYS,
   ROUND_LABELS,
+  REGIONS,
   sortMatchupEntries,
   parseMatchupIndex,
   getRegionForMatchup,
@@ -22,17 +23,17 @@ interface UserPick {
 interface SurvivorBracketViewProps {
   bracketData: OfficialBracketData
   activeRound: number
-  userPicks?: UserPick[]  // User's picks to highlight
-  entryStatus?: 'alive' | 'eliminated'  // Entry status for elimination indication
+  userPicks?: UserPick[]
+  entryStatus?: 'alive' | 'eliminated'
+  activeContestDay?: number
 }
 
-function MatchupCard({ matchup, roundKey, matchupIndex, userPicks, roundNumber, entryStatus }: {
+function MatchupCard({ matchup, roundKey, matchupIndex, userPicks, roundNumber }: {
   matchup: BracketMatchup
   roundKey: string
   matchupIndex: number
   userPicks?: UserPick[]
   roundNumber: number
-  entryStatus?: 'alive' | 'eliminated'
 }) {
   const hasWinner = matchup.winner != null && matchup.winner !== ''
   const team1Won = hasWinner && matchup.winner === matchup.team1
@@ -40,15 +41,10 @@ function MatchupCard({ matchup, roundKey, matchupIndex, userPicks, roundNumber, 
   const team1Empty = !matchup.team1 || matchup.team1 === ''
   const team2Empty = !matchup.team2 || matchup.team2 === ''
 
-  // Find user's pick for this round
   const userPick = userPicks?.find(p => p.round_number === roundNumber)
   const team1IsPicked = userPick?.team_name === matchup.team1
   const team2IsPicked = userPick?.team_name === matchup.team2
 
-  // Determine highlight state:
-  // - Yellow glow: user selected this team (pending)
-  // - Green glow: user selected and team won
-  // - Red glow: user selected and team lost (but entry not yet marked eliminated - will show in later rounds)
   const team1SelectedPending = team1IsPicked && userPick?.result === 'pending'
   const team1SelectedWon = team1IsPicked && userPick?.result === 'won'
   const team1SelectedLost = team1IsPicked && userPick?.result === 'eliminated'
@@ -57,10 +53,8 @@ function MatchupCard({ matchup, roundKey, matchupIndex, userPicks, roundNumber, 
   const team2SelectedWon = team2IsPicked && userPick?.result === 'won'
   const team2SelectedLost = team2IsPicked && userPick?.result === 'eliminated'
 
-  // Show region label only for round64
   const regionLabel = roundKey === 'round64' ? getRegionForMatchup(matchupIndex) : null
 
-  // Determine background based on selection state
   const getTeam1Bg = () => {
     if (team1SelectedWon) return 'rgba(0,255,163,0.15)'
     if (team1SelectedLost) return 'rgba(248,113,113,0.15)'
@@ -77,7 +71,6 @@ function MatchupCard({ matchup, roundKey, matchupIndex, userPicks, roundNumber, 
     return 'transparent'
   }
 
-  // Determine border for selection highlight
   const getTeam1Border = () => {
     if (team1SelectedPending) return '2px solid rgba(250,204,21,0.6)'
     if (team1SelectedWon) return '2px solid rgba(0,255,163,0.6)'
@@ -100,9 +93,7 @@ function MatchupCard({ matchup, roundKey, matchupIndex, userPicks, roundNumber, 
           {regionLabel}
         </div>
       )}
-      {/* Team 1 */}
-      <div
-        className="flex items-center gap-1 px-1 py-0.5 border-b"
+      <div className="flex items-center gap-1 px-1 py-0.5 border-b"
         style={{
           borderColor: 'rgba(255,255,255,0.04)',
           opacity: hasWinner && !team1Won ? 0.35 : 1,
@@ -121,9 +112,7 @@ function MatchupCard({ matchup, roundKey, matchupIndex, userPicks, roundNumber, 
         {team1Won && <span className="text-[7px]" style={{ color: '#00FFA3' }}>W</span>}
         {team1SelectedPending && <span className="text-[7px]" style={{ color: '#FACC15' }}>PICK</span>}
       </div>
-      {/* Team 2 */}
-      <div
-        className="flex items-center gap-1 px-1 py-0.5"
+      <div className="flex items-center gap-1 px-1 py-0.5"
         style={{
           opacity: hasWinner && !team2Won ? 0.35 : 1,
           background: getTeam2Bg(),
@@ -145,7 +134,27 @@ function MatchupCard({ matchup, roundKey, matchupIndex, userPicks, roundNumber, 
   )
 }
 
-export function SurvivorBracketView({ bracketData, activeRound, userPicks, entryStatus }: SurvivorBracketViewProps) {
+// Get regions for left side (East, West) or right side (South, Midwest)
+function getSideRegions(side: 'left' | 'right'): string[] {
+  return side === 'left' ? ['East', 'West'] : ['South', 'Midwest']
+}
+
+// Get matchups for a specific region in a round
+function getRegionMatchups(results: Record<string, Record<string, BracketMatchup>>, roundKey: string, region: string): [string, BracketMatchup][] {
+  const roundMatchups = results[roundKey] ?? {}
+  const entries = Object.entries(roundMatchups) as [string, BracketMatchup][]
+  return entries.filter(([key, matchup]) => {
+    const idx = parseMatchupIndex(key)
+    const matchupRegion = getRegionForMatchup(idx)
+    return matchupRegion === region
+  }).sort((a, b) => {
+    const aIdx = parseMatchupIndex(a[0])
+    const bIdx = parseMatchupIndex(b[0])
+    return aIdx - bIdx
+  })
+}
+
+export function SurvivorBracketView({ bracketData, activeRound, userPicks, entryStatus, activeContestDay = 1 }: SurvivorBracketViewProps) {
   const [expanded, setExpanded] = useState(true)
   const results = bracketData.results
 
@@ -157,126 +166,142 @@ export function SurvivorBracketView({ bracketData, activeRound, userPicks, entry
     )
   }
 
-  // Calculate visual priority based on active round
-  const getRoundStyle = (roundNum: number, totalMatchups: number) => {
+  // Determine round priority styling
+  const getRoundStyle = (roundNum: number) => {
     const isActive = roundNum === activeRound
     const isPast = roundNum < activeRound
 
-    // Active round: full size, green highlight
-    // Past rounds: smaller, muted
-    // Future rounds: smallest, most compact
     if (isActive) {
-      return {
-        scale: 1,
-        opacity: 1,
-        minWidth: '140px',
-        padding: '8px',
-        headerColor: '#00FFA3',
-        borderColor: 'rgba(0,255,163,0.4)',
-        background: 'rgba(0,255,163,0.03)',
-      }
+      return { scale: 1, opacity: 1, headerColor: '#00FFA3', borderColor: 'rgba(0,255,163,0.4)', background: 'rgba(0,255,163,0.03)' }
     } else if (isPast) {
-      return {
-        scale: 0.7,
-        opacity: 0.8,
-        minWidth: '80px',
-        padding: '4px',
-        headerColor: '#6B6B80',
-        borderColor: 'rgba(255,255,255,0.04)',
-        background: 'transparent',
-      }
+      return { scale: 0.75, opacity: 0.8, headerColor: '#6B6B80', borderColor: 'rgba(255,255,255,0.04)', background: 'transparent' }
     } else {
-      // Future rounds
-      return {
-        scale: 0.55,
-        opacity: 0.6,
-        minWidth: '60px',
-        padding: '2px',
-        headerColor: '#4A4A60',
-        borderColor: 'rgba(255,255,255,0.02)',
-        background: 'transparent',
-      }
+      return { scale: 0.6, opacity: 0.5, headerColor: '#4A4A60', borderColor: 'rgba(255,255,255,0.02)', background: 'transparent' }
     }
   }
 
+  // Round keys for the regional rounds (first 4)
+  const regionalRounds = ROUND_KEYS.slice(0, 4) // round64, round32, sweet16, elite8
+  const finalRounds = ROUND_KEYS.slice(4) // finalFour, championship
+
   return (
     <div className="rounded-xl overflow-hidden" style={{ background: '#12122A', border: '1px solid rgba(255,255,255,0.08)' }}>
-      {/* Toggle header */}
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full px-4 py-3 flex items-center justify-between hover:bg-white/[0.02] transition-colors"
-      >
-        <span className="text-xs font-bold uppercase tracking-widest" style={{ color: '#6B6B80' }}>
-          Tournament Bracket
-        </span>
+      <button onClick={() => setExpanded(!expanded)} className="w-full px-4 py-3 flex items-center justify-between hover:bg-white/[0.02] transition-colors">
+        <span className="text-xs font-bold uppercase tracking-widest" style={{ color: '#6B6B80' }}>Tournament Bracket</span>
         <div className="flex items-center gap-2">
-          <span className="text-[10px]" style={{ color: '#4A4A60' }}>
-            {expanded ? 'Collapse' : 'Expand'}
-          </span>
-          {expanded
-            ? <ChevronUp className="w-4 h-4" style={{ color: '#6B6B80' }} />
-            : <ChevronDown className="w-4 h-4" style={{ color: '#6B6B80' }} />
-          }
+          <span className="text-[10px]" style={{ color: '#4A4A60' }}>{expanded ? 'Collapse' : 'Expand'}</span>
+          {expanded ? <ChevronUp className="w-4 h-4" style={{ color: '#6B6B80' }} /> : <ChevronDown className="w-4 h-4" style={{ color: '#6B6B80' }} />}
         </div>
       </button>
 
       {expanded && (
-        <div className="border-t overflow-x-auto py-3" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
-          {/* Traditional bracket layout - active round prominent */}
-          <div className="flex items-start gap-2 px-2" style={{ minWidth: '900px' }}>
-            {ROUND_KEYS.map((roundKey, idx) => {
-              const roundNum = idx + 1
-              const roundMatchups = results[roundKey] ?? {}
-              const entries = sortMatchupEntries(
-                Object.entries(roundMatchups) as [string, BracketMatchup][]
-              )
-              const style = getRoundStyle(roundNum, entries.length)
+        <div className="border-t overflow-x-auto p-3" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+          {/* Traditional bracket layout: Left side | Final Four/Championship | Right side */}
+          <div className="flex items-start justify-center gap-4 min-w-[800px]">
+            {/* LEFT SIDE: East + West regions */}
+            <div className="flex gap-3">
+              {/* East Region */}
+              <div className="space-y-2">
+                <div className="text-center text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: '#00FFA3' }}>East</div>
+                {regionalRounds.map((roundKey) => {
+                  const roundNum = ROUND_KEYS.indexOf(roundKey) + 1
+                  const style = getRoundStyle(roundNum)
+                  const matchups = getRegionMatchups(results, roundKey, 'East')
+                  return (
+                    <div key={`east-${roundKey}`} className="rounded-lg" style={{ transform: `scale(${style.scale})`, transformOrigin: 'top left', opacity: style.opacity }}>
+                      <div className="text-[8px] font-bold uppercase text-center mb-1" style={{ color: style.headerColor }}>{ROUND_LABELS[roundKey]}</div>
+                      <div className="space-y-1">
+                        {matchups.map(([key, matchup]) => (
+                          <MatchupCard key={key} matchup={matchup} roundKey={roundKey} matchupIndex={parseMatchupIndex(key)} userPicks={userPicks} roundNumber={roundNum} />
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
 
-              return (
-                <div
-                  key={roundKey}
-                  className="flex-shrink-0 rounded-lg"
-                  style={{
-                    minWidth: style.minWidth,
-                    padding: style.padding,
-                    background: style.background,
-                    border: `1px solid ${style.borderColor}`,
-                    transform: `scale(${style.scale})`,
-                    transformOrigin: 'top center',
-                    opacity: style.opacity,
-                  }}
-                >
-                  {/* Round header */}
-                  <div className="text-center mb-2">
-                    <div className="text-[10px] font-bold uppercase tracking-wider" style={{
-                      color: style.headerColor,
-                    }}>
-                      {ROUND_LABELS[roundKey]}
+              {/* West Region */}
+              <div className="space-y-2">
+                <div className="text-center text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: '#00FFA3' }}>West</div>
+                {regionalRounds.map((roundKey) => {
+                  const roundNum = ROUND_KEYS.indexOf(roundKey) + 1
+                  const style = getRoundStyle(roundNum)
+                  const matchups = getRegionMatchups(results, roundKey, 'West')
+                  return (
+                    <div key={`west-${roundKey}`} className="rounded-lg" style={{ transform: `scale(${style.scale})`, transformOrigin: 'top left', opacity: style.opacity }}>
+                      <div className="text-[8px] font-bold uppercase text-center mb-1" style={{ color: style.headerColor }}>{ROUND_LABELS[roundKey]}</div>
+                      <div className="space-y-1">
+                        {matchups.map(([key, matchup]) => (
+                          <MatchupCard key={key} matchup={matchup} roundKey={roundKey} matchupIndex={parseMatchupIndex(key)} userPicks={userPicks} roundNumber={roundNum} />
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* CENTER: Final Four + Championship */}
+            <div className="flex flex-col items-center justify-center gap-2 px-4">
+              {finalRounds.map((roundKey) => {
+                const roundNum = ROUND_KEYS.indexOf(roundKey) + 1
+                const style = getRoundStyle(roundNum)
+                const matchups = Object.entries(results[roundKey] ?? {}).sort((a, b) => parseMatchupIndex(a[0]) - parseMatchupIndex(b[0]))
+                return (
+                  <div key={roundKey} className="rounded-lg" style={{ transform: `scale(${style.scale})`, opacity: style.opacity }}>
+                    <div className="text-[10px] font-bold uppercase text-center mb-1" style={{ color: style.headerColor }}>{ROUND_LABELS[roundKey]}</div>
+                    <div className="space-y-1">
+                      {matchups.map(([key, matchup]) => (
+                        <MatchupCard key={key} matchup={matchup} roundKey={roundKey} matchupIndex={parseMatchupIndex(key)} userPicks={userPicks} roundNumber={roundNum} />
+                      ))}
                     </div>
                   </div>
+                )
+              })}
+            </div>
 
-                  {/* Matchups */}
-                  <div className="space-y-1.5">
-                    {entries.map(([key, matchup]) => (
-                      <MatchupCard
-                        key={key}
-                        matchup={matchup}
-                        roundKey={roundKey}
-                        matchupIndex={parseMatchupIndex(key)}
-                        userPicks={userPicks}
-                        roundNumber={roundNum}
-                        entryStatus={entryStatus}
-                      />
-                    ))}
-                    {entries.length === 0 && (
-                      <div className="text-center py-2">
-                        <span className="text-[8px]" style={{ color: '#4A4A60' }}>—</span>
+            {/* RIGHT SIDE: South + Midwest regions */}
+            <div className="flex gap-3">
+              {/* South Region */}
+              <div className="space-y-2">
+                <div className="text-center text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: '#F59E0B' }}>South</div>
+                {regionalRounds.map((roundKey) => {
+                  const roundNum = ROUND_KEYS.indexOf(roundKey) + 1
+                  const style = getRoundStyle(roundNum)
+                  const matchups = getRegionMatchups(results, roundKey, 'South')
+                  return (
+                    <div key={`south-${roundKey}`} className="rounded-lg" style={{ transform: `scale(${style.scale})`, transformOrigin: 'top right', opacity: style.opacity }}>
+                      <div className="text-[8px] font-bold uppercase text-center mb-1" style={{ color: style.headerColor }}>{ROUND_LABELS[roundKey]}</div>
+                      <div className="space-y-1">
+                        {matchups.map(([key, matchup]) => (
+                          <MatchupCard key={key} matchup={matchup} roundKey={roundKey} matchupIndex={parseMatchupIndex(key)} userPicks={userPicks} roundNumber={roundNum} />
+                        ))}
                       </div>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Midwest Region */}
+              <div className="space-y-2">
+                <div className="text-center text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: '#F59E0B' }}>Midwest</div>
+                {regionalRounds.map((roundKey) => {
+                  const roundNum = ROUND_KEYS.indexOf(roundKey) + 1
+                  const style = getRoundStyle(roundNum)
+                  const matchups = getRegionMatchups(results, roundKey, 'Midwest')
+                  return (
+                    <div key={`midwest-${roundKey}`} className="rounded-lg" style={{ transform: `scale(${style.scale})`, transformOrigin: 'top right', opacity: style.opacity }}>
+                      <div className="text-[8px] font-bold uppercase text-center mb-1" style={{ color: style.headerColor }}>{ROUND_LABELS[roundKey]}</div>
+                      <div className="space-y-1">
+                        {matchups.map(([key, matchup]) => (
+                          <MatchupCard key={key} matchup={matchup} roundKey={roundKey} matchupIndex={parseMatchupIndex(key)} userPicks={userPicks} roundNumber={roundNum} />
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
           </div>
         </div>
       )}

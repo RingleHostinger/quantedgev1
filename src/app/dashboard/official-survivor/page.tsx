@@ -227,9 +227,10 @@ export default function OfficialSurvivorPage() {
   if (!data) return null
 
   // ─── Extract data ───────────────────────────────────────────────────────
-  const { pool, myEntries, leaderboard, currentRound, totalEntrants, bracketData, activeRound: apiActiveRound } = data
+  const { pool, myEntries, leaderboard, currentRound, totalEntrants, bracketData, activeRound: apiActiveRound, activeContestDay: apiContestDay } = data
 
   const activeRound = apiActiveRound ?? currentRound
+  const activeContestDay = apiContestDay ?? 1
   const activeRoundKey = roundNumberToKey(activeRound)
   const activeRoundMatchups = (bracketData?.results?.[activeRoundKey] ?? {}) as Record<string, BracketMatchup>
 
@@ -356,21 +357,44 @@ export default function OfficialSurvivorPage() {
           </div>
         </div>
 
-        {/* Round Status */}
-        <div className="flex items-center gap-2">
-          {Object.entries(roundStates).map(([key, state]) => (
-            <span
-              key={key}
-              className="text-xs px-2 py-1 rounded font-medium"
-              style={{
-                background: state === 'graded' ? 'rgba(239,68,68,0.15)' : state === 'closed' ? 'rgba(250,204,21,0.15)' : 'rgba(0,255,163,0.15)',
-                color: state === 'graded' ? '#EF4444' : state === 'closed' ? '#EAB308' : '#22C55E',
-              }}
-              title={`${key}: ${state}`}
-            >
-              {key === 'round64' ? 'R64' : key === 'round32' ? 'R32' : key === 'sweet16' ? 'S16' : key === 'elite8' ? 'E8' : key === 'finalFour' ? 'F4' : 'CH'}:{state === 'graded' ? 'X' : state === 'closed' ? '-' : '✓'}
-            </span>
-          ))}
+        {/* Round Status with Contest Day Context */}
+        <div className="flex flex-col items-end gap-2">
+          <div className="text-xs px-3 py-1 rounded-full font-medium"
+            style={{ background: 'rgba(245,158,11,0.15)', color: '#F59E0B' }}>
+            Day {activeContestDay} of 10
+          </div>
+          <div className="flex items-center gap-2">
+            {Object.entries(roundStates).map(([key, state]) => {
+              // Map round key to contest day range for tooltip
+              const dayRange: Record<string, string> = {
+                round64: 'Days 1-2',
+                round32: 'Days 3-4',
+                sweet16: 'Days 5-6',
+                elite8: 'Days 7-8',
+                finalFour: 'Day 9',
+                championship: 'Day 10',
+              }
+              return (
+                <span
+                  key={key}
+                  className="text-xs px-2 py-1 rounded font-medium"
+                  style={{
+                    background: state === 'graded' ? 'rgba(239,68,68,0.15)' : state === 'closed' ? 'rgba(250,204,21,0.15)' : 'rgba(0,255,163,0.15)',
+                    color: state === 'graded' ? '#EF4444' : state === 'closed' ? '#EAB308' : '#22C55E',
+                  }}
+                  title={`${dayRange[key] || key}: ${state}`}
+                >
+                  {key === 'round64' ? 'R64' : key === 'round32' ? 'R32' : key === 'sweet16' ? 'S16' : key === 'elite8' ? 'E8' : key === 'finalFour' ? 'F4' : 'CH'}:{state === 'graded' ? 'X' : state === 'closed' ? '-' : '✓'}
+                </span>
+              )
+            })}
+          </div>
+          {/* Legend */}
+          <div className="text-[10px] flex items-center gap-3" style={{ color: '#6B6B80' }}>
+            <span><span style={{ color: '#22C55E' }}>✓</span> Open</span>
+            <span><span style={{ color: '#EAB308' }}>-</span> Closed</span>
+            <span><span style={{ color: '#EF4444' }}>X</span> Graded</span>
+          </div>
         </div>
         <div className="text-right">
           <p className="text-xs" style={{ color: '#6B6B80' }}>Round</p>
@@ -406,6 +430,7 @@ export default function OfficialSurvivorPage() {
             activeRound={activeRound}
             userPicks={userPicks}
             entryStatus={currentEntry?.status}
+            activeContestDay={activeContestDay}
           />
         </div>
       )}
