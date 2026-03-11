@@ -32,6 +32,9 @@ interface AdminBracketEditorProps {
   onSaveTestPreview?: (data: OfficialBracketData) => Promise<void>
 }
 
+// Placeholder function to prevent ReferenceError when onSaveTestPreview is not provided
+const noop = async () => {}
+
 // Constants
 const REGIONS = ['East', 'West', 'South', 'Midwest'] as const
 const SEED_PAIRINGS: [number, number][] = [
@@ -225,7 +228,8 @@ export default function AdminBracketEditor({
   onSave,
   onConfirm,
   onLoadTeams,
-  onGradeGame
+  onGradeGame,
+  onSaveTestPreview
 }: AdminBracketEditorProps) {
   // Local state for editing
   const [regions, setRegions] = useState<Record<string, BracketTeam[]>>({
