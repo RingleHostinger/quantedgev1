@@ -47,15 +47,20 @@ export async function GET(_req: NextRequest) {
 
   const officialPoolId = pool.id
 
-  // All entries for this pool
+  // All entries for this pool (exclude test entries from public stats)
   const { data: allEntries } = await supabaseAdmin
     .from('official_survivor_entries')
-    .select('id, user_id, entry_number, status, created_at')
+    .select('id, user_id, entry_number, status, created_at, is_test_entry')
     .eq('pool_id', officialPoolId)
     .eq('status', 'active')
     .order('created_at', { ascending: true })
 
-  const entries: OfficialEntry[] = (allEntries ?? []) as OfficialEntry[]
+  // Separate real entries from test entries - test entries excluded from public stats
+  const allEntriesList = (allEntries ?? []) as OfficialEntry[]
+  const realEntries = allEntriesList.filter(e => !(e as Record<string, unknown>).is_test_entry)
+
+  // Public stats only include real entries
+  const entries: OfficialEntry[] = realEntries
 
   // All picks linked to this pool's entries
   const entryIds = entries.map((e) => e.id)

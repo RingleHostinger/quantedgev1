@@ -543,7 +543,7 @@ export default function ModelPerformancePage() {
           <h1 className="text-2xl font-black" style={{ color: '#E6E6FA' }}>Model Performance</h1>
         </div>
         <p className="text-sm" style={{ color: '#A0A0B0' }}>
-          Official AI picks — top 5 highest edge-score bets selected each day. Results tracked against sportsbook lines.
+          Official AI pick — highest edge-score bet selected daily. Results tracked against sportsbook lines.
         </p>
         <p className="text-xs mt-1" style={{ color: '#6B6B80' }}>
           ROI calculated at flat $110 to win $100 (standard -110). Pushes excluded from win %.
@@ -736,7 +736,7 @@ export default function ModelPerformancePage() {
                   {tab === 'pending' && pendingData && pendingData.picks.length > 0 && (
                     <span className="ml-1.5 text-[10px] font-black px-1.5 py-0.5 rounded-full"
                       style={{ background: 'rgba(0,255,163,0.2)', color: '#00FFA3' }}>
-                      {pendingData.picks.length}/5
+                      {pendingData.picks.length}/1
                     </span>
                   )}
                 </button>
@@ -763,12 +763,10 @@ export default function ModelPerformancePage() {
                   </div>
                 ) : (
                   <>
-                    {/* Slate date label */}
+                    {/* Single pick label */}
                     {pendingData.slateStart && (
                       <p className="text-xs mb-3" style={{ color: '#4A4A60' }}>
-                        Sports day: {new Date(pendingData.slateStart).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                        {' → '}
-                        {new Date(pendingData.slateEnd).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                        Official Pick for {new Date(pendingData.slateStart).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} EST
                       </p>
                     )}
                     <div className="space-y-2">

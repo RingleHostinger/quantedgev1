@@ -114,7 +114,6 @@ export default function AdminPage() {
   }>>([])
   const [loadingBrackets, setLoadingBrackets] = useState(false)
   const [bracketActionId, setBracketActionId] = useState<string | null>(null)
-  const [bracketMsg, setBracketMsg] = useState('')
 
   // Bracket model weights
   const [modelWeights, setModelWeights] = useState({
@@ -189,6 +188,26 @@ export default function AdminPage() {
   const [survivorTestMode, setSurvivorTestMode] = useState(false)
   const [survivorTestLoading, setSurvivorTestLoading] = useState(false)
   const [survivorTestMsg, setSurvivorTestMsg] = useState('')
+
+  // Official Survivor bracket management
+  const [bracketData, setBracketData] = useState<Record<string, unknown> | null>(null)
+  const [bracketConfirmed, setBracketConfirmed] = useState(false)
+  const [bracketLoading, setBracketLoading] = useState(false)
+  const [bracketMsg, setBracketMsg] = useState('')
+  const [bracketText, setBracketText] = useState('')
+
+  // Official Survivor test entry
+  const [testEntryUserId, setTestEntryUserId] = useState('')
+  const [testEntryNumber, setTestEntryNumber] = useState(1)
+  const [testEntryLoading, setTestEntryLoading] = useState(false)
+  const [testEntryMsg, setTestEntryMsg] = useState('')
+
+  // Official Survivor entries list (including test)
+  const [allEntries, setAllEntries] = useState<Array<{
+    id: string; userId: string; entryNumber: number; status: string;
+    isTestEntry: boolean; createdAt: string; userName: string; userEmail: string;
+  }>>([])
+  const [entriesLoading, setEntriesLoading] = useState(false)
 
   // Survivor grading
   interface SurvivorPickAdmin {
@@ -301,6 +320,112 @@ export default function AdminPage() {
     finally { setSurvivorTestLoading(false) }
   }
 
+  // Official Survivor bracket management
+  const loadBracketData = async () => {
+    setBracketLoading(true)
+    setBracketMsg('')
+    try {
+      const res = await fetch('/api/admin/survivor-bracket')
+      const data = await res.json()
+      if (res.ok) {
+        setBracketData(data.bracketData)
+        setBracketConfirmed(data.isConfirmed)
+      } else {
+        setBracketMsg(data.error || 'Failed to load bracket')
+      }
+    } catch { setBracketMsg('Error loading bracket') }
+    finally { setBracketLoading(false) }
+  }
+
+  const saveBracketData = async () => {
+    setBracketLoading(true)
+    setBracketMsg('')
+    try {
+      let parsed = {}
+      if (bracketText.trim()) {
+        try {
+          parsed = JSON.parse(bracketText)
+        } catch {
+          setBracketMsg('Invalid JSON format')
+          setBracketLoading(false)
+          return
+        }
+      }
+      const res = await fetch('/api/admin/survivor-bracket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bracketData: parsed, action: 'save' }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setBracketData(parsed)
+        setBracketConfirmed(false)
+        setBracketMsg('Bracket saved. Click "Confirm Bracket" when ready.')
+      } else {
+        setBracketMsg(data.error || 'Failed to save bracket')
+      }
+    } catch { setBracketMsg('Error saving bracket') }
+    finally { setBracketLoading(false) }
+  }
+
+  const confirmBracket = async () => {
+    setBracketLoading(true)
+    setBracketMsg('')
+    try {
+      const res = await fetch('/api/admin/survivor-bracket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bracketData: bracketData, action: 'confirm' }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setBracketConfirmed(true)
+        setBracketMsg('Bracket confirmed and is now LIVE!')
+      } else {
+        setBracketMsg(data.error || 'Failed to confirm bracket')
+      }
+    } catch { setBracketMsg('Error confirming bracket') }
+    finally { setBracketLoading(false) }
+  }
+
+  // Official Survivor test entry
+  const loadAllEntries = async () => {
+    setEntriesLoading(true)
+    try {
+      const res = await fetch('/api/admin/survivor-test-entry')
+      const data = await res.json()
+      if (res.ok) {
+        setAllEntries(data.entries || [])
+      }
+    } catch { /* ignore */ }
+    finally { setEntriesLoading(false) }
+  }
+
+  const createTestEntry = async () => {
+    if (!testEntryUserId.trim()) {
+      setTestEntryMsg('Enter a user ID')
+      return
+    }
+    setTestEntryLoading(true)
+    setTestEntryMsg('')
+    try {
+      const res = await fetch('/api/admin/survivor-test-entry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: testEntryUserId.trim(), entryNumber: testEntryNumber }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setTestEntryMsg('Test entry created (free, excluded from stats)')
+        setTestEntryUserId('')
+        loadAllEntries()
+      } else {
+        setTestEntryMsg(data.error || 'Failed to create entry')
+      }
+    } catch { setTestEntryMsg('Error creating entry') }
+    finally { setTestEntryLoading(false) }
+  }
+
   const loadGradingPicks = async (status = gradingFilter, league = gradingLeague) => {
     setGradingLoading(true)
     setGradingMsg('')
@@ -377,6 +502,9 @@ export default function AdminPage() {
     })
     // Load survivor test mode state on mount
     loadSurvivorTestMode()
+    // Load official survivor bracket and entries
+    loadBracketData()
+    loadAllEntries()
   }, [router])
 
   const handleToggleVisibility = async (predId: string, currentPremium: boolean) => {
@@ -2208,9 +2336,189 @@ export default function AdminPage() {
             </div>
           )}
 
-          {/* Official Contest */}
+          {/* Official Contest - Bracket Management */}
           {activeTab === 'official-contest' && (
-            <OfficialContestTab />
+            <div className="space-y-5">
+              {/* Header */}
+              <div>
+                <h2 className="text-lg font-bold text-white">Official Survivor — Bracket & Testing</h2>
+                <p className="text-sm mt-0.5" style={{ color: '#A0A0B0' }}>
+                  Manage the official tournament bracket, create test entries, and control testing mode.
+                </p>
+              </div>
+
+              {/* Bracket Management Card */}
+              <div className="glass-card rounded-2xl p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-bold" style={{ color: '#E6E6FA' }}>Bracket Management</h3>
+                  <div className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full ${bracketConfirmed ? 'bg-[#00FFA3]' : 'bg-[#F59E0B]'}`} />
+                    <span className="text-xs font-semibold" style={{ color: bracketConfirmed ? '#00FFA3' : '#F59E0B' }}>
+                      {bracketConfirmed ? 'Confirmed (LIVE)' : 'Not Confirmed'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* JSON Input */}
+                <div className="mb-4">
+                  <label className="text-xs block mb-1.5" style={{ color: '#A0A0B0' }}>Bracket JSON Data</label>
+                  <textarea
+                    value={bracketText}
+                    onChange={(e) => setBracketText(e.target.value)}
+                    placeholder='{"rounds": [{"name": "Round of 64", "games": [...]}]}'
+                    className="w-full h-32 rounded-lg px-3 py-2 text-xs font-mono text-white resize-none"
+                    style={{ background: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)' }}
+                  />
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={saveBracketData}
+                    disabled={bracketLoading}
+                    className="px-4 py-2 rounded-xl text-sm font-medium transition-all hover:opacity-80 disabled:opacity-50"
+                    style={{ background: 'rgba(255,255,255,0.07)', color: '#A0A0B0', border: '1px solid rgba(255,255,255,0.1)' }}
+                  >
+                    {bracketLoading ? 'Saving...' : 'Save Bracket'}
+                  </button>
+                  <button
+                    onClick={confirmBracket}
+                    disabled={bracketLoading || bracketConfirmed}
+                    className="px-4 py-2 rounded-xl text-sm font-bold transition-all hover:opacity-80 disabled:opacity-50"
+                    style={bracketConfirmed
+                      ? { background: 'rgba(0,255,163,0.12)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.25)' }
+                      : { background: 'rgba(0,255,163,0.12)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.25)' }
+                    }
+                  >
+                    {bracketLoading ? 'Confirming...' : bracketConfirmed ? 'Confirmed' : 'Confirm Bracket (Go Live)'}
+                  </button>
+                </div>
+
+                {bracketMsg && (
+                  <div className="mt-3 text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.05)', color: '#A0A0B0' }}>
+                    {bracketMsg}
+                  </div>
+                )}
+              </div>
+
+              {/* Test Entry Creation */}
+              <div className="glass-card rounded-2xl p-5">
+                <h3 className="text-sm font-bold mb-1" style={{ color: '#E6E6FA' }}>Create Test Entry (Admin Only)</h3>
+                <p className="text-xs mb-4" style={{ color: '#A0A0B0' }}>
+                  Create a free test entry that is excluded from all public stats and leaderboards.
+                </p>
+
+                <div className="flex gap-3 flex-wrap items-end">
+                  <div className="flex-1 min-w-[200px]">
+                    <label className="text-xs block mb-1.5" style={{ color: '#A0A0B0' }}>User ID</label>
+                    <input
+                      value={testEntryUserId}
+                      onChange={(e) => setTestEntryUserId(e.target.value)}
+                      placeholder="Enter user UUID"
+                      className="w-full rounded-lg px-3 py-2 text-sm text-white"
+                      style={{ background: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)' }}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs block mb-1.5" style={{ color: '#A0A0B0' }}>Entry #</label>
+                    <select
+                      value={testEntryNumber}
+                      onChange={(e) => setTestEntryNumber(parseInt(e.target.value))}
+                      className="rounded-lg px-3 py-2 text-sm text-white"
+                      style={{ background: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)' }}
+                    >
+                      {[1, 2, 3].map(n => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                  </div>
+                  <button
+                    onClick={createTestEntry}
+                    disabled={testEntryLoading || !testEntryUserId.trim()}
+                    className="px-5 py-2 rounded-xl text-sm font-bold transition-all hover:opacity-80 disabled:opacity-40"
+                    style={{ background: 'rgba(245,158,11,0.12)', color: '#F59E0B', border: '1px solid rgba(245,158,11,0.25)' }}
+                  >
+                    {testEntryLoading ? 'Creating...' : 'Create Test Entry'}
+                  </button>
+                </div>
+
+                {testEntryMsg && (
+                  <div className="mt-3 text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.05)', color: '#A0A0B0' }}>
+                    {testEntryMsg}
+                  </div>
+                )}
+              </div>
+
+              {/* Entries List */}
+              <div className="glass-card rounded-2xl overflow-hidden">
+                <div className="p-4 border-b flex items-center justify-between" style={{ borderColor: 'rgba(255,255,255,0.07)' }}>
+                  <h3 className="text-sm font-semibold" style={{ color: '#E6E6FA' }}>All Entries (Including Test)</h3>
+                  <button
+                    onClick={loadAllEntries}
+                    disabled={entriesLoading}
+                    className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium hover:opacity-80"
+                    style={{ background: 'rgba(255,255,255,0.05)', color: '#A0A0B0' }}
+                  >
+                    <RefreshCw className={`w-3 h-3 ${entriesLoading ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </button>
+                </div>
+
+                {allEntries.length === 0 ? (
+                  <div className="p-10 text-center">
+                    <Ticket className="w-8 h-8 mx-auto mb-2" style={{ color: '#4A4A60' }} />
+                    <p className="text-sm" style={{ color: '#6B6B80' }}>No entries yet.</p>
+                  </div>
+                ) : (
+                  <div className="divide-y max-h-64 overflow-y-auto" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+                    {allEntries.map((entry) => (
+                      <div key={entry.id} className="p-3 flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium" style={{ color: '#E6E6FA' }}>{entry.userName}</span>
+                          <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'rgba(255,255,255,0.07)', color: '#A0A0B0' }}>
+                            #{entry.entryNumber}
+                          </span>
+                          {entry.isTestEntry && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                              style={{ background: 'rgba(245,158,11,0.15)', color: '#F59E0B', border: '1px solid rgba(245,158,11,0.25)' }}>
+                              TEST
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs" style={{ color: '#6B6B80' }}>{entry.userEmail}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Testing Mode Toggle */}
+              <div className="glass-card rounded-2xl p-5">
+                <h3 className="text-sm font-bold mb-4" style={{ color: '#E6E6FA' }}>Testing Mode</h3>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium" style={{ color: '#E6E6FA' }}>Enable Testing Mode</div>
+                    <div className="text-xs mt-0.5" style={{ color: '#6B6B80' }}>
+                      When enabled, Official Survivor page becomes accessible for testing
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => toggleSurvivorTestMode(!survivorTestMode)}
+                    disabled={survivorTestLoading}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all disabled:opacity-50"
+                    style={survivorTestMode
+                      ? { background: 'rgba(255,107,107,0.12)', color: '#FF6B6B', border: '1px solid rgba(255,107,107,0.3)' }
+                      : { background: 'rgba(0,255,163,0.12)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.3)' }
+                    }
+                  >
+                    <FlaskConical className="w-4 h-4" />
+                    {survivorTestLoading ? 'Updating...' : survivorTestMode ? 'Disable' : 'Enable'}
+                  </button>
+                </div>
+                {survivorTestMsg && (
+                  <div className="mt-3 text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.05)', color: '#A0A0B0' }}>
+                    {survivorTestMsg}
+                  </div>
+                )}
+              </div>
+            </div>
           )}
 
           {/* Survivor Test Mode */}

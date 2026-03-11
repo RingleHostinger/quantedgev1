@@ -137,10 +137,10 @@ export async function selectAndInsertOfficialPicks(): Promise<OfficialPicksResul
     return { inserted: 0, skipped: 0, errors: [] }
   }
 
-  // Take top 5 from qualified games
-  const top5 = qualified.slice(0, 5)
+  // Take top 1 from qualified games (single daily pick)
+  const top1 = qualified.slice(0, 1)
 
-  for (const row of top5) {
+  for (const row of top1) {
     try {
       const { betType, modelLine } = determineBetType(
         row.spread_edge,
@@ -249,16 +249,16 @@ export async function replaceOfficialPicksForDay(
     return { inserted: 0, skipped: 0, errors }
   }
 
-  // Step 3: Filter for minimum edge quality, take top 5
+  // Step 3: Filter for minimum edge quality, take top 1 (single daily pick)
   const qualified = rows.filter((r) => Math.abs(r.spread_edge ?? 0) >= 1.5)
   console.info(`[officialPicksService:replace] Slate window: ${slateStart} → ${slateEnd}. Candidates: ${rows.length}, qualified (edge>=1.5): ${qualified.length}`)
   if (qualified.length === 0) return { inserted: 0, skipped: 0, errors: [] }
 
-  const top5 = qualified.slice(0, 5)
+  const top1 = qualified.slice(0, 1)
   let inserted = 0
   let skipped = 0
 
-  for (const row of top5) {
+  for (const row of top1) {
     try {
       const { betType, modelLine } = determineBetType(
         row.spread_edge,

@@ -35,24 +35,34 @@ export async function GET(req: NextRequest) {
   const SELECT_COLS = 'id, league, home_team, away_team, bet_type, pick_team, sportsbook_line, model_line, spread_edge, confidence_score, edge_score, result, commence_time, result_recorded_at, line_at_pick, closing_line'
 
   if (tab === 'pending') {
-    // Only today's active slate — max 5 picks
+    // Only today's active slate — max 1 pick
     const { start: slateStart, end: slateEnd } = getTodaySlateRange()
 
-    const { data, error } = await supabaseAdmin
+    // Use .lt() only — nubase drops .gte() when combined with .lt() on same column
+    const { data: allRows, error } = await supabaseAdmin
       .from('official_picks')
       .select(SELECT_COLS)
       .eq('result', 'pending')
-      .gte('commence_time', slateStart)
       .lt('commence_time', slateEnd)
       .order('edge_score', { ascending: false })
-      .limit(5)
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
+    // JS-filter for lower bound >= slateStart
+    const slateStartMs = new Date(slateStart).getTime()
+    const rows = (allRows ?? []).filter((r) => {
+      const t = r.commence_time
+      if (!t) return false
+      return new Date(t).getTime() >= slateStartMs
+    })
+
+    // Return top 1 (single daily pick)
+    const picks = rows.slice(0, 1)
+
     return NextResponse.json({
-      picks: data ?? [],
+      picks,
       tab: 'pending',
       slateStart,
       slateEnd,
