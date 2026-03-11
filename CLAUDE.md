@@ -26,31 +26,96 @@ Next.js 15 full-stack template with Supabase, TailwindCSS 4, and shadcn/ui.
 
 ```
 src/
-├── app/                    # Next.js App Router
-│   ├── layout.tsx          # Root layout (ThemeProvider + Toaster)
-│   ├── page.tsx            # Home page
-│   ├── globals.css         # Global styles + theme variables
-│   └── api/                # API routes (minimal use)
+├── app/                              # Next.js App Router
+│   ├── layout.tsx                    # Root layout (ThemeProvider + Toaster)
+│   ├── page.tsx                      # Home page (redirects to dashboard)
+│   ├── globals.css                   # Global styles + theme variables
+│   ├── login/page.tsx                # Login page
+│   ├── signup/page.tsx               # Signup page
+│   ├── forgot-password/page.tsx      # Password reset
+│   ├── pricing/page.tsx              # Pricing page
+│   ├── dashboard/
+│   │   ├── layout.tsx                # Dashboard layout (sidebar nav)
+│   │   ├── page.tsx                  # Dashboard home
+│   │   ├── admin/page.tsx            # Admin panel (multi-tab)
+│   │   ├── official-survivor/page.tsx # Official Survivor contest
+│   │   ├── survivor/page.tsx         # Survivor pool builder
+│   │   ├── bracket-lab/              # Bracket Lab (builder, analysis, compare)
+│   │   ├── official-picks/page.tsx   # AI daily picks
+│   │   ├── picks/page.tsx            # User picks
+│   │   ├── edges/page.tsx            # Betting edges
+│   │   ├── briefing/page.tsx         # Daily briefing
+│   │   ├── heatmap/page.tsx          # Prediction heatmap
+│   │   ├── injuries/page.tsx         # Injury reports
+│   │   ├── insights/page.tsx         # AI insights
+│   │   ├── teams/page.tsx            # Teams data
+│   │   ├── players/page.tsx          # Player stats
+│   │   ├── results/page.tsx          # Past results
+│   │   ├── engine/page.tsx           # Prediction engine
+│   │   ├── model-performance/page.tsx # Model performance metrics
+│   │   ├── account/page.tsx          # User account settings
+│   │   └── pricing/page.tsx          # Pricing (in-dash)
+│   └── api/
+│       ├── auth/                     # Auth routes (login, signup, logout, me)
+│       ├── admin/                    # Admin API routes
+│       │   ├── survivor-bracket/     # Bracket mgmt (load_teams, grade_game, confirm)
+│       │   ├── survivor-test-entry/  # Test entry creation
+│       │   ├── survivor-test-mode/   # Test mode toggle
+│       │   ├── survivor-grade/       # Survivor pick grading
+│       │   ├── official-contest/     # Contest management
+│       │   ├── games/                # Game management
+│       │   ├── predictions/          # Prediction admin
+│       │   ├── pipeline/             # Data pipeline
+│       │   └── ...                   # Other admin routes
+│       ├── survivor/                 # Survivor pool APIs
+│       │   ├── official/             # Official contest (GET/POST)
+│       │   ├── analyze/              # AI analysis
+│       │   └── simulate/             # Monte Carlo simulation
+│       ├── predictions/              # Prediction API
+│       ├── odds/                     # Odds + refresh
+│       ├── brackets/                 # Bracket CRUD + analysis
+│       ├── stripe/                   # Stripe checkout + webhook
+│       ├── cron/                     # Scheduled jobs
+│       └── ...                       # Other API routes
 ├── components/
-│   ├── ui/                 # shadcn/ui components (pre-installed)
-│   └── ThemeProvider.tsx   # Theme context wrapper
+│   ├── ui/                           # shadcn/ui components (DO NOT recreate)
+│   ├── AdminBracketEditor.tsx        # Visual bracket editor (edit + grade modes)
+│   ├── BracketBuilder.tsx            # User bracket builder
+│   ├── BracketMatchup.tsx            # Bracket matchup display
+│   ├── BracketRegion.tsx             # Bracket region component
+│   ├── BracketUpload.tsx             # Bracket CSV upload
+│   ├── ThemeProvider.tsx             # Theme context wrapper
+│   ├── QuantEdgeLogo.tsx             # App logo
+│   └── ...                           # Other shared components
 ├── hooks/
-│   └── use-mobile.tsx      # Mobile detection (<768px)
+│   ├── use-mobile.tsx                # Mobile detection (<768px)
+│   ├── use-toast.tsx                 # Toast notifications
+│   ├── useAuth.ts                    # Auth state hook
+│   └── useZoerIframe.ts             # Zoer iframe integration
 ├── lib/
-│   └── utils.ts            # Utilities (cn function)
+│   ├── auth.ts                       # Session/auth utilities (getSession)
+│   ├── utils.ts                      # Utilities (cn function)
+│   ├── officialContestUtils.ts       # Prize pool calculation
+│   ├── officialPicksService.ts       # Official picks service
+│   ├── prediction-engine.ts          # AI prediction engine
+│   ├── bracket-analysis.ts           # Bracket analysis utilities
+│   ├── oddsSyncService.ts            # Odds synchronization
+│   ├── oddsCacheService.ts           # Odds caching
+│   ├── stripe-config.ts              # Stripe configuration
+│   └── ...                           # Other utilities
 └── integrations/
     └── supabase/
-        ├── client.ts       # Client-side (RLS enabled)
-        └── server.ts       # Server-side (RLS bypassed)
-
-.zoer/                      # Zoer Agent context
-├── STRUCTURE.md            # This file (project knowledge base)
-└── PLAN.md                 # Project plan and tasks
+        ├── client.ts                 # Client-side (RLS enabled)
+        └── server.ts                 # Server-side (RLS bypassed)
 ```
 
 **Key Directories:**
 - `app/` - Next.js routes and layouts
+- `app/dashboard/` - Main application pages (behind auth)
+- `app/api/admin/` - Admin-only API routes
 - `components/ui/` - shadcn/ui components (DO NOT recreate)
+- `components/` - Custom shared components
+- `lib/` - Business logic and utilities
 - `integrations/supabase/` - Database client configuration
 
 ---
@@ -58,9 +123,12 @@ src/
 ## 3. Core Systems
 
 ### 3.1 Authentication
-- **Provider:** Supabase Auth
-- **Status:** Not implemented yet
-- **Location:** TBD
+- **Provider:** Supabase Auth (custom JWT via `src/lib/auth.ts`)
+- **Status:** Implemented
+- **Routes:** `/login`, `/signup`, `/forgot-password`
+- **Hook:** `useAuth()` for client-side auth state
+- **Server:** `getSession()` from `src/lib/auth.ts` for API routes
+- **Admin:** Role-based (`users.role === 'admin'`), admin UUID: `55555555-0000-0000-0000-000000000001`
 
 ### 3.2 UI Components
 - **Library:** shadcn/ui (Radix UI + TailwindCSS)
@@ -78,13 +146,41 @@ src/
 ### 3.4 Database
 - **Provider:** Supabase (PostgreSQL)
 - **RLS:** Enabled (use client.ts) / Bypassed (use server.ts)
-- **Tables:** None yet
+- **Key Tables:** `users`, `games`, `predictions`, `survivor_pools`, `survivor_picks`, `official_survivor_entries`, `bracket_teams`, `admin_settings`, `brackets`
 - **Types:** Auto-generate with `npx supabase gen types`
 
 ### 3.5 Routing
 - **Pattern:** App Router (Next.js 15)
 - **Server Components:** Default
 - **Client Components:** Add `'use client'` when needed
+
+### 3.6 Official Survivor Contest
+- **Status:** Implemented
+- **User Page:** `/dashboard/official-survivor` — leaderboard, entry purchase, pick submission
+- **Admin:** "Official Contest" tab in admin panel
+- **Bracket Editor:** `AdminBracketEditor.tsx` — visual editor with edit mode (4 regions x 16 seeds) and grade mode (game-by-game winner selection with automatic advancement)
+- **Date Gate:** Users see countdown until `2026-03-16T23:00:00Z`; admin test mode bypasses this
+- **Test Mode:** Admin toggle via `admin_settings.survivor_test_mode`; test entries (`is_test_entry=true`) excluded from public stats
+- **Bracket Data Structure:** `{ regions: { [region]: [{seed, name}] }, results: { [roundKey]: { [matchupKey]: { team1, team2, team1Seed, team2Seed, winner } } } }`
+- **Round Keys:** `round64`, `round32`, `sweet16`, `elite8`, `finalFour`, `championship`
+- **Seed Pairings:** `[[1,16],[8,9],[5,12],[4,13],[6,11],[3,14],[7,10],[2,15]]`
+- **Prize Pool:** Calculated via `computePrizePool()` in `officialContestUtils.ts`
+- **Pick Limit:** 1 pick per entry per day (enforced server-side)
+
+### 3.7 Admin Panel
+- **Location:** `/dashboard/admin` (multi-tab)
+- **Tabs:** overview, games, predictions, free-pick, users, visibility, briefing, injuries-admin, overrides, bracket-model, bracket-mgmt, pipeline, grading, survivor-test, survivor-grading, official-contest
+- **Key Admin APIs:** `survivor-bracket` (load_teams, grade_game, confirm, save), `survivor-test-entry`, `survivor-test-mode`, `official-contest`, `games`, `predictions`, `pipeline`
+
+### 3.8 Prediction Engine
+- **Location:** `src/lib/prediction-engine.ts`
+- **Features:** AI-powered sports predictions, odds sync, model performance tracking
+- **Cron Jobs:** `daily-full`, `daily-rollover`, `odds-refresh`
+
+### 3.9 Payments
+- **Provider:** Stripe
+- **Routes:** `/api/stripe/create-checkout`, `/api/stripe/webhook`
+- **Config:** `src/lib/stripe-config.ts`
 
 ---
 
@@ -155,13 +251,23 @@ const isMobile = useMobile() // true if < 768px
 ## 6. Current State
 
 ### Implemented Features
+- User authentication (login, signup, password reset)
+- Role-based access control (admin vs regular user)
+- Dashboard with sidebar navigation
+- AI prediction engine with model performance tracking
+- Official daily picks (1 pick/day per user)
+- Bracket Lab (builder, analysis, comparison)
+- Official Survivor contest (entries, picks, leaderboard, prize pool)
+- Visual bracket editor for admin (edit mode + grade mode)
+- Admin test mode for previewing survivor contest before go-live
+- Test data isolation (test entries excluded from public metrics)
+- Game-by-game grading with automatic winner advancement
+- Betting edges, heatmap, injury reports
+- Stripe payment integration
 - Theme system (light/dark mode)
 - shadcn/ui components library
-- Supabase client setup
 - Toast notifications
-- Mobile detection hook
-- User authentication (not yet)
-- Database tables (not yet)
+- Mobile responsive design
 
 ### Installed Dependencies
 - next 15
@@ -172,6 +278,7 @@ const isMobile = useMobile() // true if < 768px
 - lucide-react
 - next-themes
 - @supabase/supabase-js
+- stripe
 
 ### Environment Variables
 Required in `.env.local`:
@@ -179,10 +286,21 @@ Required in `.env.local`:
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=
 ```
 
-### Database Schema
-No tables created yet.
+### Key Database Tables
+- `users` — User accounts with role field (admin/user)
+- `games` — Sports games with odds data
+- `predictions` — AI model predictions
+- `survivor_pools` — Survivor pool configuration (official pool has `is_official=true`)
+- `survivor_picks` — Individual picks with result tracking (pending/won/eliminated)
+- `official_survivor_entries` — Contest entries with `is_test_entry` flag
+- `bracket_teams` — Tournament team data by region and seed
+- `brackets` — User bracket builds
+- `admin_settings` — Key-value admin config (test mode, live mode, etc.)
 
 ---
 
@@ -215,3 +333,7 @@ Before modifying files:
 - [ ] Check TypeScript types
 
 ---
+
+## 8. Maintenance Log
+
+- **2026-03-11**: Added visual bracket editor (AdminBracketEditor), game-by-game grading, admin test mode preview, test data isolation (`is_test_entry` column), updated survivor APIs with bracketLive/isAdmin flags, integrated bracket editor into admin page replacing JSON textarea

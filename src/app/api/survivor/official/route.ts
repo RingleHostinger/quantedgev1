@@ -147,6 +147,28 @@ export async function GET(_req: NextRequest) {
   // Prize pool
   const prizePool = computePrizePool(entries.length)
 
+  // Check if current user is admin with test mode enabled → bracketLive bypass
+  let bracketLive = false
+  let isAdmin = false
+
+  const { data: currentUser } = await supabaseAdmin
+    .from('users')
+    .select('role')
+    .eq('id', session.userId)
+    .single()
+
+  if (currentUser?.role === 'admin') {
+    isAdmin = true
+    const { data: testModeSetting } = await supabaseAdmin
+      .from('admin_settings')
+      .select('value')
+      .eq('key', 'survivor_test_mode')
+      .single()
+    if (testModeSetting?.value === 'true') {
+      bracketLive = true
+    }
+  }
+
   return NextResponse.json({
     pool,
     myEntries: myLeaderboardRows,
@@ -157,6 +179,8 @@ export async function GET(_req: NextRequest) {
     currentRound,
     totalEntrants: entries.length,
     prizePool,
+    bracketLive,
+    isAdmin,
   })
 }
 

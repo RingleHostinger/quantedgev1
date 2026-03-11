@@ -65,6 +65,8 @@ interface OfficialData {
   currentRound: number
   totalEntrants: number
   prizePool: PrizePool
+  bracketLive?: boolean
+  isAdmin?: boolean
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -278,7 +280,8 @@ function OfficialSurvivorInner() {
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'leaderboard' | 'my-entries' | 'rules'>('leaderboard')
 
-  const bracketLive = new Date() >= BRACKET_RELEASE
+  const bracketLive = new Date() >= BRACKET_RELEASE || (data?.bracketLive === true)
+  const isTestMode = data?.isAdmin === true && data?.bracketLive === true && new Date() < BRACKET_RELEASE
 
   const fetchData = useCallback(async () => {
     try {
@@ -363,6 +366,16 @@ function OfficialSurvivorInner() {
           <CheckCircle className="w-4 h-4 flex-shrink-0" style={{ color: '#00FFA3' }} />
           <p className="text-sm font-semibold" style={{ color: '#00FFA3' }}>
             Entry confirmed! Make your picks below to join the contest.
+          </p>
+        </div>
+      )}
+
+      {/* Test mode banner */}
+      {isTestMode && (
+        <div className="rounded-xl p-3 flex items-center gap-3" style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)' }}>
+          <Shield className="w-4 h-4 flex-shrink-0" style={{ color: '#F59E0B' }} />
+          <p className="text-sm font-semibold" style={{ color: '#F59E0B' }}>
+            TEST MODE — You are previewing as admin. Regular users see the countdown.
           </p>
         </div>
       )}

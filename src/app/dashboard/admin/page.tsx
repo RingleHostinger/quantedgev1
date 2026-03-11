@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Shield, Users, Target, Plus, Brain, CheckCircle, Gift, TrendingUp, Activity, Eye, EyeOff, Newspaper, AlertTriangle, ToggleLeft, ToggleRight, FlaskConical, Trash2, Star, Zap, RefreshCw, Database, Clock, BarChart3, Play, CheckSquare, Calendar, Trophy, Filter, DollarSign, Ticket, Crown, Medal, XCircle } from 'lucide-react'
+import AdminBracketEditor from '@/components/AdminBracketEditor'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -194,7 +195,6 @@ export default function AdminPage() {
   const [bracketConfirmed, setBracketConfirmed] = useState(false)
   const [bracketLoading, setBracketLoading] = useState(false)
   const [bracketMsg, setBracketMsg] = useState('')
-  const [bracketText, setBracketText] = useState('')
 
   // Official Survivor test entry
   const [testEntryUserId, setTestEntryUserId] = useState('')
@@ -337,55 +337,81 @@ export default function AdminPage() {
     finally { setBracketLoading(false) }
   }
 
-  const saveBracketData = async () => {
+  const saveBracketData = async (data: Record<string, unknown>) => {
     setBracketLoading(true)
     setBracketMsg('')
     try {
-      let parsed = {}
-      if (bracketText.trim()) {
-        try {
-          parsed = JSON.parse(bracketText)
-        } catch {
-          setBracketMsg('Invalid JSON format')
-          setBracketLoading(false)
-          return
-        }
-      }
       const res = await fetch('/api/admin/survivor-bracket', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bracketData: parsed, action: 'save' }),
+        body: JSON.stringify({ bracketData: data, action: 'save' }),
       })
-      const data = await res.json()
+      const result = await res.json()
       if (res.ok) {
-        setBracketData(parsed)
+        setBracketData(data)
         setBracketConfirmed(false)
         setBracketMsg('Bracket saved. Click "Confirm Bracket" when ready.')
       } else {
-        setBracketMsg(data.error || 'Failed to save bracket')
+        setBracketMsg(result.error || 'Failed to save bracket')
       }
     } catch { setBracketMsg('Error saving bracket') }
     finally { setBracketLoading(false) }
   }
 
-  const confirmBracket = async () => {
+  const confirmBracket = async (data: Record<string, unknown>) => {
     setBracketLoading(true)
     setBracketMsg('')
     try {
       const res = await fetch('/api/admin/survivor-bracket', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bracketData: bracketData, action: 'confirm' }),
+        body: JSON.stringify({ bracketData: data, action: 'confirm' }),
       })
-      const data = await res.json()
+      const result = await res.json()
       if (res.ok) {
         setBracketConfirmed(true)
+        if (result.bracketData) setBracketData(result.bracketData)
         setBracketMsg('Bracket confirmed and is now LIVE!')
       } else {
-        setBracketMsg(data.error || 'Failed to confirm bracket')
+        setBracketMsg(result.error || 'Failed to confirm bracket')
       }
     } catch { setBracketMsg('Error confirming bracket') }
     finally { setBracketLoading(false) }
+  }
+
+  const loadBracketTeams = async (): Promise<Record<string, Array<{ seed: number; name: string }>> | null> => {
+    try {
+      const res = await fetch('/api/admin/survivor-bracket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'load_teams' }),
+      })
+      const data = await res.json()
+      if (res.ok && data.regions) return data.regions
+      setBracketMsg(data.error || 'No teams found in database')
+      return null
+    } catch {
+      setBracketMsg('Error loading teams from database')
+      return null
+    }
+  }
+
+  const gradeGame = async (roundKey: string, matchupKey: string, winner: string) => {
+    setBracketMsg('')
+    try {
+      const res = await fetch('/api/admin/survivor-bracket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'grade_game', roundKey, matchupKey, winner }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        if (data.bracketData) setBracketData(data.bracketData)
+        setBracketMsg(data.message || 'Game graded successfully')
+      } else {
+        setBracketMsg(data.error || 'Failed to grade game')
+      }
+    } catch { setBracketMsg('Error grading game') }
   }
 
   // Official Survivor test entry
@@ -2347,58 +2373,20 @@ export default function AdminPage() {
                 </p>
               </div>
 
-              {/* Bracket Management Card */}
-              <div className="glass-card rounded-2xl p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-bold" style={{ color: '#E6E6FA' }}>Bracket Management</h3>
-                  <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${bracketConfirmed ? 'bg-[#00FFA3]' : 'bg-[#F59E0B]'}`} />
-                    <span className="text-xs font-semibold" style={{ color: bracketConfirmed ? '#00FFA3' : '#F59E0B' }}>
-                      {bracketConfirmed ? 'Confirmed (LIVE)' : 'Not Confirmed'}
-                    </span>
-                  </div>
+              {/* Visual Bracket Editor */}
+              <AdminBracketEditor
+                bracketData={bracketData as never}
+                bracketConfirmed={bracketConfirmed}
+                onSave={saveBracketData as never}
+                onConfirm={confirmBracket as never}
+                onLoadTeams={loadBracketTeams}
+                onGradeGame={gradeGame}
+              />
+              {bracketMsg && (
+                <div className="text-xs px-3 py-2 rounded-lg mt-2" style={{ background: 'rgba(255,255,255,0.05)', color: '#A0A0B0' }}>
+                  {bracketMsg}
                 </div>
-
-                {/* JSON Input */}
-                <div className="mb-4">
-                  <label className="text-xs block mb-1.5" style={{ color: '#A0A0B0' }}>Bracket JSON Data</label>
-                  <textarea
-                    value={bracketText}
-                    onChange={(e) => setBracketText(e.target.value)}
-                    placeholder='{"rounds": [{"name": "Round of 64", "games": [...]}]}'
-                    className="w-full h-32 rounded-lg px-3 py-2 text-xs font-mono text-white resize-none"
-                    style={{ background: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)' }}
-                  />
-                </div>
-
-                <div className="flex gap-3">
-                  <button
-                    onClick={saveBracketData}
-                    disabled={bracketLoading}
-                    className="px-4 py-2 rounded-xl text-sm font-medium transition-all hover:opacity-80 disabled:opacity-50"
-                    style={{ background: 'rgba(255,255,255,0.07)', color: '#A0A0B0', border: '1px solid rgba(255,255,255,0.1)' }}
-                  >
-                    {bracketLoading ? 'Saving...' : 'Save Bracket'}
-                  </button>
-                  <button
-                    onClick={confirmBracket}
-                    disabled={bracketLoading || bracketConfirmed}
-                    className="px-4 py-2 rounded-xl text-sm font-bold transition-all hover:opacity-80 disabled:opacity-50"
-                    style={bracketConfirmed
-                      ? { background: 'rgba(0,255,163,0.12)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.25)' }
-                      : { background: 'rgba(0,255,163,0.12)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.25)' }
-                    }
-                  >
-                    {bracketLoading ? 'Confirming...' : bracketConfirmed ? 'Confirmed' : 'Confirm Bracket (Go Live)'}
-                  </button>
-                </div>
-
-                {bracketMsg && (
-                  <div className="mt-3 text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.05)', color: '#A0A0B0' }}>
-                    {bracketMsg}
-                  </div>
-                )}
-              </div>
+              )}
 
               {/* Test Entry Creation */}
               <div className="glass-card rounded-2xl p-5">
