@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/integrations/supabase/server'
 import { getSession } from '@/lib/auth'
 import { computePrizePool } from '@/lib/officialContestUtils'
+import {
+  type BracketMatchup,
+  type OfficialBracketData,
+  computeRoundCompletion,
+  computeActiveRound,
+  ROUND_KEYS,
+} from '@/lib/bracketTypes'
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -37,7 +44,7 @@ export async function GET(_req: NextRequest) {
   // Official pool
   const { data: pool, error: poolErr } = await supabaseAdmin
     .from('survivor_pools')
-    .select('id, pool_name, pool_size, pick_format, team_reuse, strike_rule, is_active, created_at')
+    .select('id, pool_name, pool_size, pick_format, team_reuse, strike_rule, is_active, created_at, bracket_data, bracket_confirmed')
     .eq('is_official', true)
     .single()
 
@@ -295,6 +302,32 @@ export async function GET(_req: NextRequest) {
   // Prize pool
   const prizePool = computePrizePool(entries.length)
 
+  // ─── Bracket Data & Round Status ──────────────────────────────────────────
+  // Determine which bracket data to use: test mode uses saved test data, otherwise use pool's bracket
+  let liveBracketData: OfficialBracketData | null = null
+  if (isTestMode && testBracketData) {
+    liveBracketData = testBracketData as OfficialBracketData
+  } else if (isAdminPreview && testBracketData) {
+    liveBracketData = testBracketData as OfficialBracketData
+  } else if (pool.bracket_data) {
+    liveBracketData = pool.bracket_data as OfficialBracketData
+  }
+
+  const bracketResults = liveBracketData?.results as Record<string, Record<string, BracketMatchup>> | undefined
+  const roundCompletionStatus = computeRoundCompletion(bracketResults)
+  const activeRound = computeActiveRound(bracketResults)
+
+  // Compute used teams per entry (team names from won/pending picks - for team reuse prevention)
+  const allMyPicks = [...picks, ...testPicks]
+  const usedTeamsByEntry: Record<string, string[]> = {}
+  for (const p of allMyPicks) {
+    if (!p.official_entry_id) continue
+    if (!usedTeamsByEntry[p.official_entry_id]) usedTeamsByEntry[p.official_entry_id] = []
+    if (p.result !== 'eliminated') {
+      usedTeamsByEntry[p.official_entry_id].push(p.team_name)
+    }
+  }
+
   return NextResponse.json({
     pool,
     myEntries: myLeaderboardRows,
@@ -310,6 +343,10 @@ export async function GET(_req: NextRequest) {
     isAdminPreview,
     isTestMode,
     testBracketData,
+    bracketData: liveBracketData,
+    roundCompletionStatus,
+    activeRound,
+    usedTeamsByEntry,
   })
 }
 
@@ -358,7 +395,7 @@ export async function POST(req: NextRequest) {
   // Check if this entry has been eliminated
   const { data: existingPicks } = await supabaseAdmin
     .from('survivor_picks')
-    .select('id, round_number, result')
+    .select('id, round_number, result, team_name')
     .eq('official_entry_id', entry_id)
     .order('round_number', { ascending: true })
 
@@ -370,6 +407,17 @@ export async function POST(req: NextRequest) {
   const existingRoundPick = (existingPicks ?? []).find((p) => p.round_number === round_number)
   if (existingRoundPick && existingRoundPick.result !== 'pending') {
     return NextResponse.json({ error: 'This round has already been resolved' }, { status: 400 })
+  }
+
+  // Team reuse validation: check if this team was already picked in a previous round
+  const previousTeams = (existingPicks ?? [])
+    .filter((p) => p.round_number !== round_number)
+    .map((p) => p.team_name as string)
+    .filter(Boolean)
+    .map((t) => t.toLowerCase())
+
+  if (previousTeams.includes(team_name.toLowerCase())) {
+    return NextResponse.json({ error: 'You already used this team in a previous round' }, { status: 400 })
   }
 
   const now = new Date().toISOString()

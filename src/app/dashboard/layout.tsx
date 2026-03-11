@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
@@ -14,6 +14,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
 import { QuantEdgeLogo } from '@/components/QuantEdgeLogo'
 import { DataFreshnessIndicator } from '@/components/DataFreshnessIndicator'
+import { SidebarCollapseContext } from '@/hooks/useSidebarCollapse'
 import Image from 'next/image'
 
 const navItems = [
@@ -45,6 +46,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const pathname = usePathname()
   const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+
+  const sidebarCollapseValue = useMemo(
+    () => ({ collapsed: sidebarCollapsed, setCollapsed: setSidebarCollapsed }),
+    [sidebarCollapsed]
+  )
 
   useEffect(() => {
     if (!loading && !user) {
@@ -227,14 +234,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   )
 
   return (
+    <SidebarCollapseContext.Provider value={sidebarCollapseValue}>
     <div className="flex h-screen" style={{ background: '#0F0F1A' }}>
       {/* Desktop sidebar */}
-      <aside
-        className="hidden lg:flex flex-col w-64 border-r flex-shrink-0"
-        style={{ background: '#0C0C18', borderColor: 'rgba(255,255,255,0.07)' }}
-      >
-        <SidebarContent />
-      </aside>
+      {!sidebarCollapsed && (
+        <aside
+          className="hidden lg:flex flex-col w-64 border-r flex-shrink-0"
+          style={{ background: '#0C0C18', borderColor: 'rgba(255,255,255,0.07)' }}
+        >
+          <SidebarContent />
+        </aside>
+      )}
 
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
@@ -267,6 +277,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </button>
             <QuantEdgeLogo variant="full" width={130} href="/dashboard" />
           </div>
+
+          {/* Desktop: show menu button when sidebar collapsed */}
+          {sidebarCollapsed && (
+            <button
+              onClick={() => setSidebarCollapsed(false)}
+              className="hidden lg:flex p-2 rounded-lg hover:bg-white/5 items-center gap-2"
+              style={{ color: '#A0A0B0' }}
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+          )}
 
           {/* Desktop: current page label */}
           <div className="hidden lg:block">
@@ -309,5 +330,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </main>
       </div>
     </div>
+    </SidebarCollapseContext.Provider>
   )
 }
