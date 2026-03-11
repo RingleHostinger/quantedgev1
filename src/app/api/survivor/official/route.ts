@@ -153,9 +153,10 @@ export async function GET(_req: NextRequest) {
     return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
   }).map((row, idx) => ({ rank: idx + 1, ...row }))
 
-  // Check if current user is admin with test mode enabled → bracketLive bypass
+  // Check if current user is admin with test mode or admin preview mode enabled → bracketLive bypass
   let bracketLive = false
   let isAdmin = false
+  let isAdminPreview = false
   let testBracketData = null
 
   const { data: currentUser } = await supabaseAdmin
@@ -166,6 +167,19 @@ export async function GET(_req: NextRequest) {
 
   if (currentUser?.role === 'admin') {
     isAdmin = true
+
+    // Check admin preview mode (new: separate from test mode, bypasses countdown for previewing)
+    const { data: adminPreviewSetting } = await supabaseAdmin
+      .from('admin_settings')
+      .select('value')
+      .eq('key', 'survivor_admin_preview')
+      .single()
+    if (adminPreviewSetting?.value === 'true') {
+      isAdminPreview = true
+      bracketLive = true
+    }
+
+    // Check test mode (existing: for testing entries)
     const { data: testModeSetting } = await supabaseAdmin
       .from('admin_settings')
       .select('value')
@@ -293,6 +307,7 @@ export async function GET(_req: NextRequest) {
     prizePool,
     bracketLive,
     isAdmin,
+    isAdminPreview,
     isTestMode,
     testBracketData,
   })

@@ -67,6 +67,7 @@ interface OfficialData {
   prizePool: PrizePool
   bracketLive?: boolean
   isAdmin?: boolean
+  isAdminPreview?: boolean
   isTestMode?: boolean
   testBracketData?: unknown
 }
@@ -282,16 +283,43 @@ function OfficialSurvivorInner() {
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'leaderboard' | 'my-entries' | 'rules'>('leaderboard')
   const [enteredView, setEnteredView] = useState(false)
+  const [adminPreviewLoading, setAdminPreviewLoading] = useState(false)
 
   const bracketLive = new Date() >= BRACKET_RELEASE || (data?.bracketLive === true)
-  // Use isTestMode from API (includes test entries in myEntries for preview)
+  // Use isTestMode and isAdminPreview from API
   const isTestMode = data?.isTestMode === true
+  const isAdmin = data?.isAdmin === true
+  const isAdminPreview = data?.isAdminPreview === true
 
   // Determine if user can enter pool:
   // 1. Has real entries (myEntryCount > 0)
   // 2. OR test mode is enabled (admin preview)
+  // 3. OR admin preview mode is enabled
   const hasEntries = (data?.myEntryCount ?? 0) > 0
-  const canEnterPool = hasEntries || isTestMode
+  const canEnterPool = hasEntries || isTestMode || isAdminPreview
+
+  // Toggle admin preview mode
+  const toggleAdminPreview = async (enable: boolean) => {
+    setAdminPreviewLoading(true)
+    try {
+      const res = await fetch('/api/admin/survivor-admin-preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: enable }),
+      })
+      if (res.ok) {
+        // Refresh data to get updated state
+        const dataRes = await fetch('/api/survivor/official')
+        if (dataRes.ok) {
+          setData(await dataRes.json())
+        }
+      }
+    } catch (err) {
+      console.error('Failed to toggle admin preview:', err)
+    } finally {
+      setAdminPreviewLoading(false)
+    }
+  }
 
   const fetchData = useCallback(async () => {
     try {
@@ -349,6 +377,47 @@ function OfficialSurvivorInner() {
         {/* Show prize pool even pre-bracket if we have data */}
         {data && <PrizePoolWidget prizePool={data.prizePool} totalEntrants={data.totalEntrants} />}
 
+        {/* Admin Preview Mode Toggle - Only show for admins when not in preview */}
+        {isAdmin && !isAdminPreview && (
+          <div className="rounded-xl p-4 flex items-center justify-between" style={{ background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.3)' }}>
+            <div className="flex items-center gap-3">
+              <Shield className="w-5 h-5" style={{ color: '#8B5CF6' }} />
+              <div>
+                <p className="text-sm font-semibold" style={{ color: '#E6E6FA' }}>Admin Preview Mode</p>
+                <p className="text-xs" style={{ color: '#A0A0B0' }}>Preview the live contest UI before launch</p>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => toggleAdminPreview(true)}
+              disabled={adminPreviewLoading}
+              style={{ background: '#8B5CF6', color: '#fff' }}
+            >
+              {adminPreviewLoading ? 'Loading...' : 'Preview Live Contest'}
+            </Button>
+          </div>
+        )}
+
+        {/* Admin Preview Mode Banner - Show when active */}
+        {isAdminPreview && (
+          <div className="rounded-xl p-3 flex items-center justify-between" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)' }}>
+            <div className="flex items-center gap-3">
+              <Shield className="w-4 h-4 flex-shrink-0" style={{ color: '#F87171' }} />
+              <p className="text-sm font-semibold" style={{ color: '#F87171' }}>
+                ADMIN PREVIEW MODE — You are viewing the live contest UI. This does not affect real contest data.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => toggleAdminPreview(false)}
+              disabled={adminPreviewLoading}
+            >
+              Exit Preview
+            </Button>
+          </div>
+        )}
+
         {/* Test mode banner */}
         {isTestMode && (
           <div className="rounded-xl p-3 flex items-center gap-3" style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)' }}>
@@ -359,15 +428,15 @@ function OfficialSurvivorInner() {
           </div>
         )}
 
-        {/* Enter Pool button - show if user has entries or test mode */}
+        {/* Enter Pool button - show if user has entries or test mode or admin preview */}
         {canEnterPool && (
           <div className="rounded-2xl p-6 text-center" style={{ background: 'rgba(0,255,163,0.06)', border: '1px solid rgba(0,255,163,0.2)' }}>
             <Trophy className="w-10 h-10 mx-auto mb-3" style={{ color: '#00FFA3' }} />
             <h2 className="text-xl font-bold mb-2" style={{ color: '#E6E6FA' }}>
-              {isTestMode ? 'Preview: Enter Pool' : 'Ready to Play'}
+              {isTestMode || isAdminPreview ? 'Preview: Enter Pool' : 'Ready to Play'}
             </h2>
             <p className="text-sm max-w-md mx-auto mb-4" style={{ color: '#A0A0B0' }}>
-              {isTestMode
+              {isTestMode || isAdminPreview
                 ? 'You are viewing the contest as an admin preview. This is for testing only.'
                 : 'Your entry is confirmed! Enter the pool to make your picks.'}
             </p>
@@ -457,6 +526,26 @@ function OfficialSurvivorInner() {
           <p className="text-sm font-semibold" style={{ color: '#F59E0B' }}>
             TEST MODE — You are previewing as admin. Regular users see the countdown.
           </p>
+        </div>
+      )}
+
+      {/* Admin Preview Mode Banner - Show when active (in addition to test mode) */}
+      {isAdminPreview && (
+        <div className="rounded-xl p-3 flex items-center justify-between" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)' }}>
+          <div className="flex items-center gap-3">
+            <Shield className="w-4 h-4 flex-shrink-0" style={{ color: '#F87171' }} />
+            <p className="text-sm font-semibold" style={{ color: '#F87171' }}>
+              ADMIN PREVIEW MODE — You are viewing the live contest UI. This does not affect real contest data.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => toggleAdminPreview(false)}
+            disabled={adminPreviewLoading}
+          >
+            Exit Preview
+          </Button>
         </div>
       )}
 
