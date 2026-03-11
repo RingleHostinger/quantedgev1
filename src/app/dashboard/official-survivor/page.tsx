@@ -291,6 +291,9 @@ function OfficialSurvivorInner() {
   const isAdmin = data?.isAdmin === true
   const isAdminPreview = data?.isAdminPreview === true
 
+  // Auto-enter when admin preview is enabled (skip the Enter Pool button)
+  const showEnteredExperience = bracketLive || enteredView || isAdminPreview
+
   // Determine if user can enter pool:
   // 1. Has real entries (myEntryCount > 0)
   // 2. OR test mode is enabled (admin preview)
@@ -370,7 +373,8 @@ function OfficialSurvivorInner() {
   }
 
   // Pre-bracket gate - but show Enter Pool button if user has entries or test mode
-  if (!bracketLive) {
+  // Also skip to live UI if admin preview is enabled
+  if (!bracketLive && !isAdminPreview) {
     return (
       <div className="px-4 lg:px-8 py-8 max-w-4xl mx-auto space-y-6">
         <PageHeader totalEntrants={data?.totalEntrants ?? 0} currentRound={1} />
@@ -474,16 +478,11 @@ function OfficialSurvivorInner() {
   const { pool, myEntries, myEntryCount, canPurchaseMore, remainingSlots, leaderboard, currentRound, totalEntrants, prizePool } = data
 
   // If bracket is not live and user hasn't entered (or no test mode), show pre-entry view
-  // But if they have entries or test mode, they can enter via Enter Pool button
+  // But if they have entries or test mode or admin preview, they can enter via Enter Pool button
   // Once enteredView is true, show the full entered experience
-  if (!bracketLive && !enteredView) {
+  if (!bracketLive && !enteredView && !isAdminPreview) {
     // This is handled above in the pre-bracket gate
   }
-
-  // Show entered experience if:
-  // 1. bracketLive is true (tournament started), OR
-  // 2. user clicked Enter Pool (enteredView = true)
-  const showEnteredExperience = bracketLive || enteredView
 
   // If bracket hasn't started, user hasn't entered, and no test mode - show purchase prompt
   if (!showEnteredExperience) {
