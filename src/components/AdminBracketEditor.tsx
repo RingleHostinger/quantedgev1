@@ -642,17 +642,6 @@ export default function AdminBracketEditor({
             <Save className="w-4 h-4" />
             {saving ? 'Saving...' : 'Save Draft'}
           </button>
-          {onSaveTestPreview && (
-            <button
-              onClick={handleSaveTestPreview}
-              disabled={saving}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all hover:opacity-80 disabled:opacity-50"
-              style={{ background: 'rgba(245,158,11,0.15)', color: '#F59E0B', border: '1px solid rgba(245,158,11,0.3)' }}
-            >
-              <Eye className="w-4 h-4" />
-              Preview Test
-            </button>
-          )}
           <button
             onClick={handleConfirmClick}
             disabled={confirming}

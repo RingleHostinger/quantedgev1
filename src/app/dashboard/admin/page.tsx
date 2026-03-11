@@ -414,25 +414,6 @@ export default function AdminPage() {
     } catch { setBracketMsg('Error grading game') }
   }
 
-  const saveTestPreview = async (data: Record<string, unknown>) => {
-    setBracketLoading(true)
-    setBracketMsg('')
-    try {
-      const res = await fetch('/api/admin/survivor-bracket', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bracketData: data, action: 'save_test_preview' }),
-      })
-      const result = await res.json()
-      if (res.ok) {
-        setBracketMsg(result.message || 'Test bracket saved! Enable test mode to preview.')
-      } else {
-        setBracketMsg(result.error || 'Failed to save test preview')
-      }
-    } catch { setBracketMsg('Error saving test preview') }
-    finally { setBracketLoading(false) }
-  }
-
   // Official Survivor test entry
   const loadAllEntries = async () => {
     setEntriesLoading(true)
@@ -2400,7 +2381,6 @@ export default function AdminPage() {
                 onConfirm={confirmBracket as never}
                 onLoadTeams={loadBracketTeams}
                 onGradeGame={gradeGame}
-                onSaveTestPreview={saveTestPreview as never}
               />
               {bracketMsg && (
                 <div className="text-xs px-3 py-2 rounded-lg mt-2" style={{ background: 'rgba(255,255,255,0.05)', color: '#A0A0B0' }}>

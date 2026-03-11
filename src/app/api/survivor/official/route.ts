@@ -81,20 +81,6 @@ export async function GET(_req: NextRequest) {
     picks = (pickRows ?? []) as SurvivorPick[]
   }
 
-  // For test mode: also fetch picks for test entries
-  let testPicks: SurvivorPick[] = []
-  const testEntryIds = allEntriesList
-    .filter((e) => (e as Record<string, unknown>).is_test_entry === true)
-    .map((e) => e.id)
-  if (testEntryIds.length > 0) {
-    const { data: testPickRows } = await supabaseAdmin
-      .from('survivor_picks')
-      .select('id, official_entry_id, user_id, round_number, team_name, team_seed, opponent_name, result, picked_at, updated_at')
-      .in('official_entry_id', testEntryIds)
-      .order('round_number', { ascending: true })
-    testPicks = (testPickRows ?? []) as SurvivorPick[]
-  }
-
   // User display names for all entrants
   const entrantIds = [...new Set(entries.map((e) => e.user_id))]
   const userMap: Record<string, { name: string; email: string }> = {}
@@ -160,170 +146,19 @@ export async function GET(_req: NextRequest) {
     return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
   }).map((row, idx) => ({ rank: idx + 1, ...row }))
 
-  // Check if current user is admin with test mode or admin preview mode enabled → bracketLive bypass
-  let bracketLive = false
-  let isAdmin = false
-  let isAdminPreview = false
-  let testBracketData = null
-
-  const { data: currentUser } = await supabaseAdmin
-    .from('users')
-    .select('role')
-    .eq('id', session.userId)
-    .single()
-
-  if (currentUser?.role === 'admin') {
-    isAdmin = true
-
-    // Check admin preview mode (new: separate from test mode, bypasses countdown for previewing)
-    const { data: adminPreviewSetting } = await supabaseAdmin
-      .from('admin_settings')
-      .select('value')
-      .eq('key', 'survivor_admin_preview')
-      .single()
-    if (adminPreviewSetting?.value === 'true') {
-      isAdminPreview = true
-      bracketLive = true
-    }
-
-    // Check test mode (existing: for testing entries)
-    const { data: testModeSetting } = await supabaseAdmin
-      .from('admin_settings')
-      .select('value')
-      .eq('key', 'survivor_test_mode')
-      .single()
-    if (testModeSetting?.value === 'true') {
-      bracketLive = true
-    }
-
-    // Load test bracket data for admin preview (when either test mode OR admin preview is enabled)
-    if (bracketLive) {
-      const { data: testBracketSetting } = await supabaseAdmin
-        .from('admin_settings')
-        .select('value')
-        .eq('key', 'survivor_test_bracket_data')
-        .single()
-      if (testBracketSetting?.value) {
-        try {
-          testBracketData = JSON.parse(testBracketSetting.value)
-        } catch { /* ignore parse errors */ }
-      }
-    }
-  }
-
   // My entries
-  // For test mode: also include test entries for admin preview
   let myEntries = entries.filter((e) => e.user_id === session.userId)
-  let isTestMode = false
-
-  // If admin with test mode enabled, also include test entries for preview
-  // Note: testBracketData is optional - we can preview entries even without saved bracket data
-  if (isAdmin && bracketLive) {
-    // Check if admin has test entries
-    const adminTestEntries = allEntriesList.filter(
-      (e) => e.user_id === session.userId && (e as Record<string, unknown>).is_test_entry === true
-    )
-    if (adminTestEntries.length > 0) {
-      isTestMode = true
-      // Include test entries in myEntries for preview
-      myEntries = [...myEntries, ...adminTestEntries]
-    }
-  }
 
   const myEntryCount = myEntries.length
-
-  // Build leaderboard rows for test entries (for preview)
-  let testLeaderboardRows: Array<{
-    rank: number
-    entryId: string
-    userId: string
-    entryNumber: number
-    displayName: string
-    status: 'alive' | 'eliminated'
-    roundsSurvived: number
-    picksCorrect: number
-    currentRound: number
-    picks: SurvivorPick[]
-    createdAt: string
-  }> = []
-
-  if (isTestMode && testPicks.length > 0) {
-    const testPicksByEntry: Record<string, SurvivorPick[]> = {}
-    for (const p of testPicks) {
-      if (!p.official_entry_id) continue
-      if (!testPicksByEntry[p.official_entry_id]) testPicksByEntry[p.official_entry_id] = []
-      testPicksByEntry[p.official_entry_id].push(p)
-    }
-
-    const testEntriesMap = new Map(
-      allEntriesList
-        .filter((e) => e.user_id === session.userId && (e as Record<string, unknown>).is_test_entry === true)
-        .map((e) => [e.id, e])
-    )
-
-    testLeaderboardRows = myEntries
-      .filter((e) => (e as Record<string, unknown>).is_test_entry === true)
-      .map((entry) => {
-        const entryPicks = testPicksByEntry[entry.id] ?? []
-        let entryStatus: 'alive' | 'eliminated' = 'alive'
-        let roundsSurvived = 0
-        let picksCorrect = 0
-
-        for (const pick of entryPicks) {
-          if (pick.result === 'won') {
-            roundsSurvived = Math.max(roundsSurvived, pick.round_number)
-            picksCorrect++
-          } else if (pick.result === 'eliminated') {
-            entryStatus = 'eliminated'
-            roundsSurvived = pick.round_number - 1
-          }
-        }
-
-        return {
-          entryId: entry.id,
-          userId: entry.user_id,
-          entryNumber: entry.entry_number,
-          displayName: userMap[entry.user_id]?.name ?? 'Unknown',
-          status: entryStatus,
-          roundsSurvived,
-          picksCorrect,
-          currentRound,
-          picks: entryPicks,
-          createdAt: entry.created_at,
-          isTestEntry: true,
-        }
-      })
-  }
-
-  // Combine real leaderboard rows with test leaderboard rows for preview
-  const myLeaderboardRows = [
-    ...leaderboard.filter((r) => r.userId === session.userId),
-    ...testLeaderboardRows,
-  ]
 
   // Prize pool
   const prizePool = computePrizePool(entries.length)
 
   // ─── Bracket Data & Round Status ──────────────────────────────────────────
-  // Use pool's bracket data (or test bracket data for admin)
+  // Read the confirmed bracket from survivor_pools
   let liveBracketData: OfficialBracketData | null = null
 
-  // Try to load test bracket data for admin users
-  if (currentUser?.role === 'admin') {
-    const { data: testBracketSetting } = await supabaseAdmin
-      .from('admin_settings')
-      .select('value')
-      .eq('key', 'survivor_test_bracket_data')
-      .single()
-    if (testBracketSetting?.value) {
-      try {
-        liveBracketData = JSON.parse(testBracketSetting.value) as OfficialBracketData
-      } catch { /* ignore parse errors */ }
-    }
-  }
-
-  // Fall back to pool's bracket data if no test data
-  if (!liveBracketData && pool.bracket_data) {
+  if (pool.bracket_data) {
     liveBracketData = pool.bracket_data as OfficialBracketData
   }
 
@@ -332,9 +167,8 @@ export async function GET(_req: NextRequest) {
   const activeRound = computeActiveRound(bracketResults)
 
   // Compute used teams per entry (team names from won/pending picks - for team reuse prevention)
-  const allMyPicks = [...picks, ...testPicks]
   const usedTeamsByEntry: Record<string, string[]> = {}
-  for (const p of allMyPicks) {
+  for (const p of picks) {
     if (!p.official_entry_id) continue
     if (!usedTeamsByEntry[p.official_entry_id]) usedTeamsByEntry[p.official_entry_id] = []
     if (p.result !== 'eliminated') {
@@ -344,7 +178,7 @@ export async function GET(_req: NextRequest) {
 
   return NextResponse.json({
     pool,
-    myEntries: myLeaderboardRows,
+    myEntries: leaderboard.filter((r) => r.userId === session.userId),
     leaderboard,
     currentRound,
     totalEntrants: entries.length,
