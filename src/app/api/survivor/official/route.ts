@@ -176,6 +176,15 @@ export async function GET(_req: NextRequest) {
     }
   }
 
+  // Check if user is admin
+  const { data: currentUser } = await supabaseAdmin
+    .from('users')
+    .select('role')
+    .eq('id', session.userId)
+    .single()
+
+  const isAdmin = currentUser?.role === 'admin'
+
   return NextResponse.json({
     pool,
     myEntries: leaderboard.filter((r) => r.userId === session.userId),
@@ -185,12 +194,14 @@ export async function GET(_req: NextRequest) {
     bracketData: liveBracketData,
     roundCompletionStatus,
     activeRound,
+    isAdmin,
   })
 }
 
 // ─── POST /api/survivor/official ─────────────────────────────────────────
 // Submit or update a pick for a specific entry.
 // Body: { entry_id, round_number, team_name, team_seed?, opponent_name?, opponent_seed?, win_probability?, ai_confidence? }
+// Or create test entry: { action: 'create_test_entry', entry_number: 1-3 }
 
 export async function POST(req: NextRequest) {
   const session = await getSession()
@@ -199,6 +210,65 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json()
+
+  // Handle special actions
+  if (body.action === 'create_test_entry') {
+    // Check if user is admin
+    const { data: currentUser } = await supabaseAdmin
+      .from('users')
+      .select('role')
+      .eq('id', session.userId)
+      .single()
+
+    if (currentUser?.role !== 'admin') {
+      return NextResponse.json({ error: 'Only admins can create test entries' }, { status: 403 })
+    }
+
+    // Get official pool
+    const { data: pool } = await supabaseAdmin
+      .from('survivor_pools')
+      .select('id')
+      .eq('is_official', true)
+      .single()
+
+    if (!pool) {
+      return NextResponse.json({ error: 'Official pool not found' }, { status: 404 })
+    }
+
+    // Check how many entries this user already has
+    const { data: existingEntries } = await supabaseAdmin
+      .from('official_survivor_entries')
+      .select('entry_number')
+      .eq('pool_id', pool.id)
+      .eq('user_id', session.userId)
+
+    const usedNumbers = new Set((existingEntries ?? []).map(e => e.entry_number))
+    const entryNumber = body.entry_number || 1
+
+    if (usedNumbers.has(entryNumber)) {
+      return NextResponse.json({ error: `Entry #${entryNumber} already exists` }, { status: 400 })
+    }
+
+    // Create test entry
+    const { data: entry, error } = await supabaseAdmin
+      .from('official_survivor_entries')
+      .insert({
+        pool_id: pool.id,
+        user_id: session.userId,
+        entry_number: entryNumber,
+        status: 'active',
+        is_test_entry: true,
+      })
+      .select()
+      .single()
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    return NextResponse.json({ success: true, entry })
+  }
+
   const { entry_id, round_number, team_name, team_seed, opponent_name, opponent_seed, win_probability, ai_confidence } = body
 
   if (!entry_id || !round_number || !team_name) {

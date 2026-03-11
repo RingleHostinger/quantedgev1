@@ -57,6 +57,7 @@ interface OfficialData {
   bracketData?: OfficialBracketData
   roundCompletionStatus?: Record<string, { total: number; completed: number; allDone: boolean }>
   activeRound?: number
+  isAdmin?: boolean
 }
 
 // ─── Main Component ────────────────────────────────────────────────────────
@@ -67,6 +68,7 @@ export default function OfficialSurvivorPage() {
   const [data, setData] = useState<OfficialData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
 
   // State for picks
   const [activeEntryIndex, setActiveEntryIndex] = useState(0)
@@ -74,6 +76,13 @@ export default function OfficialSurvivorPage() {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
+  const [creatingEntry, setCreatingEntry] = useState(false)
+
+  // Popup states
+  const [showPopup, setShowPopup] = useState(false)
+  const [popupType, setPopupType] = useState<'advance' | 'eliminated' | null>(null)
+  const [popupRound, setPopupRound] = useState<number | null>(null)
+  const [previousStatus, setPreviousStatus] = useState<Record<string, 'alive' | 'eliminated'>>({})
 
   // Auto-collapse sidebar on mount
   useEffect(() => {
@@ -93,10 +102,72 @@ export default function OfficialSurvivorPage() {
       }
       const result = await res.json()
       setData(result)
+      setIsAdmin(result.isAdmin || false)
+
+      // Check for advancement or elimination changes
+      if (result.myEntries && result.myEntries.length > 0) {
+        const currentStatus: Record<string, 'alive' | 'eliminated'> = {}
+        result.myEntries.forEach((e: LeaderboardRow) => {
+          currentStatus[e.entryId] = e.status
+        })
+
+        // Compare with previous status to detect changes
+        if (Object.keys(previousStatus).length > 0) {
+          const currentRound = result.currentRound || 1
+          result.myEntries.forEach((e: LeaderboardRow) => {
+            const prevStatus = previousStatus[e.entryId]
+            const currStatus = e.status
+            const prevRound = result.activeRound || currentRound
+
+            // Entry eliminated
+            if (prevStatus === 'alive' && currStatus === 'eliminated') {
+              setPopupType('eliminated')
+              setPopupRound(prevRound)
+              setShowPopup(true)
+              setTimeout(() => setShowPopup(false), 5000)
+            }
+            // Entry advanced to next round
+            else if (prevStatus === 'alive' && currStatus === 'alive') {
+              // Check if they survived this round
+              const survivedRound = e.picks?.some((p: SurvivorPickRow) => p.round_number === prevRound && p.result === 'won')
+              if (survivedRound) {
+                setPopupType('advance')
+                setPopupRound(prevRound + 1)
+                setShowPopup(true)
+                setTimeout(() => setShowPopup(false), 5000)
+              }
+            }
+          })
+        }
+
+        setPreviousStatus(currentStatus)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Create test entry (for admin testing)
+  const createTestEntry = async (entryNumber: number = 1) => {
+    setCreatingEntry(true)
+    try {
+      const res = await fetch('/api/survivor/official', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create_test_entry', entry_number: entryNumber }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || 'Failed to create entry')
+      }
+      // Refresh data
+      fetchData()
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to create entry')
+    } finally {
+      setCreatingEntry(false)
     }
   }
 
@@ -207,6 +278,32 @@ export default function OfficialSurvivorPage() {
 
   return (
     <div className="px-4 lg:px-6 py-6 max-w-7xl mx-auto space-y-4">
+      {/* Advancement/Elimination Popup */}
+      {showPopup && popupType && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+          <div
+            className="rounded-2xl px-8 py-6 text-center pointer-events-auto animate-bounce"
+            style={{
+              background: popupType === 'advance' ? 'rgba(0,255,163,0.15)' : 'rgba(248,113,113,0.15)',
+              border: `2px solid ${popupType === 'advance' ? 'rgba(0,255,163,0.5)' : 'rgba(248,113,113,0.5)'}`,
+            }}
+          >
+            {popupType === 'advance' ? (
+              <div>
+                <p className="text-2xl mb-1">🎉 Welcome to Round {popupRound} 🎉</p>
+                <p className="text-sm" style={{ color: '#00FFA3' }}>Your entry survived!</p>
+              </div>
+            ) : (
+              <div>
+                <p className="text-2xl mb-1">😢 Eliminated</p>
+                <p className="text-sm" style={{ color: '#F87171' }}>Your entry has been eliminated from the pool.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Rest of the UI */}
 
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -370,12 +467,35 @@ export default function OfficialSurvivorPage() {
         </>
       )}
 
-      {/* No entries yet - prompt to enter */}
+      {/* No entries yet */}
       {myEntries.length === 0 && (
         <div className="rounded-xl p-8 text-center" style={{ background: '#12122A', border: '1px solid rgba(255,255,255,0.08)' }}>
           <Trophy className="w-10 h-10 mx-auto mb-3" style={{ color: '#00FFA3' }} />
           <h2 className="text-lg font-bold mb-2" style={{ color: '#E6E6FA' }}>Join the Official Survivor</h2>
-          <p className="text-sm mb-4" style={{ color: '#A0A0B0' }}>Entry purchase coming soon. Check back later!</p>
+
+          {/* Admin: Create Test Entry button */}
+          {isAdmin && (
+            <div className="mb-4">
+              <p className="text-xs mb-3" style={{ color: '#A0A0B0' }}>Admin: Create a test entry to preview the survivor experience</p>
+              <div className="flex gap-2 justify-center">
+                {[1, 2, 3].map((num) => (
+                  <Button
+                    key={num}
+                    onClick={() => createTestEntry(num)}
+                    disabled={creatingEntry}
+                    style={{ background: 'rgba(0,255,163,0.12)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.25)' }}
+                    className="text-xs"
+                  >
+                    {creatingEntry ? 'Creating...' : `Entry #${num}`}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!isAdmin && (
+            <p className="text-sm" style={{ color: '#A0A0B0' }}>Entry purchase coming soon. Check back later!</p>
+          )}
         </div>
       )}
     </div>

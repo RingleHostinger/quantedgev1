@@ -93,16 +93,16 @@ function MatchupCard({ matchup, roundKey, matchupIndex, userPicks, roundNumber, 
   }
 
   return (
-    <div className="rounded-lg overflow-hidden" style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.06)' }}>
+    <div className="rounded overflow-hidden" style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.06)' }}>
       {regionLabel && (
-        <div className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-center"
+        <div className="px-1 py-0.5 text-[8px] font-bold uppercase tracking-wider text-center"
           style={{ background: 'rgba(255,255,255,0.03)', color: '#4A4A60' }}>
           {regionLabel}
         </div>
       )}
       {/* Team 1 */}
       <div
-        className="flex items-center gap-1.5 px-2 py-1.5 border-b"
+        className="flex items-center gap-1 px-1 py-0.5 border-b"
         style={{
           borderColor: 'rgba(255,255,255,0.04)',
           opacity: hasWinner && !team1Won ? 0.35 : 1,
@@ -110,43 +110,43 @@ function MatchupCard({ matchup, roundKey, matchupIndex, userPicks, roundNumber, 
           borderLeft: getTeam1Border(),
         }}
       >
-        <span className="text-[10px] font-bold w-4 text-center tabular-nums" style={{ color: '#6B6B80' }}>
+        <span className="text-[8px] font-bold w-3 text-center tabular-nums" style={{ color: '#6B6B80' }}>
           {team1Empty ? '-' : matchup.team1Seed}
         </span>
-        <span className="text-[11px] font-medium truncate flex-1" style={{
+        <span className="text-[9px] font-medium truncate flex-1" style={{
           color: team1Empty ? '#4A4A60' : team1SelectedWon ? '#00FFA3' : team1SelectedLost ? '#F87171' : team1SelectedPending ? '#FACC15' : team1Won ? '#00FFA3' : '#E6E6FA',
         }}>
           {team1Empty ? 'TBD' : matchup.team1}
         </span>
-        {team1Won && <span className="text-[9px]" style={{ color: '#00FFA3' }}>W</span>}
-        {team1SelectedPending && <span className="text-[9px]" style={{ color: '#FACC15' }}>PICK</span>}
+        {team1Won && <span className="text-[7px]" style={{ color: '#00FFA3' }}>W</span>}
+        {team1SelectedPending && <span className="text-[7px]" style={{ color: '#FACC15' }}>PICK</span>}
       </div>
       {/* Team 2 */}
       <div
-        className="flex items-center gap-1.5 px-2 py-1.5"
+        className="flex items-center gap-1 px-1 py-0.5"
         style={{
           opacity: hasWinner && !team2Won ? 0.35 : 1,
           background: getTeam2Bg(),
           borderLeft: getTeam2Border(),
         }}
       >
-        <span className="text-[10px] font-bold w-4 text-center tabular-nums" style={{ color: '#6B6B80' }}>
+        <span className="text-[8px] font-bold w-3 text-center tabular-nums" style={{ color: '#6B6B80' }}>
           {team2Empty ? '-' : matchup.team2Seed}
         </span>
-        <span className="text-[11px] font-medium truncate flex-1" style={{
+        <span className="text-[9px] font-medium truncate flex-1" style={{
           color: team2Empty ? '#4A4A60' : team2SelectedWon ? '#00FFA3' : team2SelectedLost ? '#F87171' : team2SelectedPending ? '#FACC15' : team2Won ? '#00FFA3' : '#E6E6FA',
         }}>
           {team2Empty ? 'TBD' : matchup.team2}
         </span>
-        {team2Won && <span className="text-[9px]" style={{ color: '#00FFA3' }}>W</span>}
-        {team2SelectedPending && <span className="text-[9px]" style={{ color: '#FACC15' }}>PICK</span>}
+        {team2Won && <span className="text-[7px]" style={{ color: '#00FFA3' }}>W</span>}
+        {team2SelectedPending && <span className="text-[7px]" style={{ color: '#FACC15' }}>PICK</span>}
       </div>
     </div>
   )
 }
 
 export function SurvivorBracketView({ bracketData, activeRound, userPicks, entryStatus }: SurvivorBracketViewProps) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(true) // Start expanded for better UX
   const results = bracketData.results
 
   if (!results) {
@@ -180,7 +180,8 @@ export function SurvivorBracketView({ bracketData, activeRound, userPicks, entry
 
       {expanded && (
         <div className="border-t overflow-x-auto" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
-          <div className="flex gap-3 p-4" style={{ minWidth: '900px' }}>
+          {/* Compact bracket layout - smaller cards, tighter spacing */}
+          <div className="flex gap-1.5 p-2" style={{ minWidth: '750px' }}>
             {ROUND_KEYS.map((roundKey, idx) => {
               const roundNum = idx + 1
               const roundMatchups = results[roundKey] ?? {}
@@ -189,23 +190,27 @@ export function SurvivorBracketView({ bracketData, activeRound, userPicks, entry
               )
               const isActive = roundNum === activeRound
 
+              // Scale down later rounds (fewer matchups = smaller cards)
+              const matchupCount = entries.length
+              const scaleFactor = matchupCount <= 1 ? 0.5 : matchupCount <= 2 ? 0.6 : matchupCount <= 4 ? 0.75 : 1
+
               return (
-                <div key={roundKey} className="flex-1 min-w-[130px]">
+                <div key={roundKey} className="flex-1 min-w-[90px]" style={{ transform: `scale(${scaleFactor})`, transformOrigin: 'top center' }}>
                   {/* Round header */}
                   <div
-                    className="text-center mb-2 pb-1.5 border-b"
+                    className="text-center mb-1 pb-1 border-b"
                     style={{
                       borderColor: isActive ? 'rgba(0,255,163,0.3)' : 'rgba(255,255,255,0.06)',
                     }}
                   >
-                    <div className="text-[10px] font-bold uppercase tracking-wider" style={{
+                    <div className="text-[9px] font-bold uppercase tracking-wider" style={{
                       color: isActive ? '#00FFA3' : '#6B6B80',
                     }}>
                       {ROUND_LABELS[roundKey]}
                     </div>
                   </div>
-                  {/* Matchups */}
-                  <div className="space-y-1.5">
+                  {/* Matchups - compact */}
+                  <div className="space-y-1">
                     {entries.map(([key, matchup]) => (
                       <MatchupCard
                         key={key}
@@ -218,8 +223,8 @@ export function SurvivorBracketView({ bracketData, activeRound, userPicks, entry
                       />
                     ))}
                     {entries.length === 0 && (
-                      <div className="text-center py-4">
-                        <span className="text-[10px]" style={{ color: '#4A4A60' }}>No matchups</span>
+                      <div className="text-center py-2">
+                        <span className="text-[8px]" style={{ color: '#4A4A60' }}>—</span>
                       </div>
                     )}
                   </div>
