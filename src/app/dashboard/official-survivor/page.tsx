@@ -281,10 +281,17 @@ function OfficialSurvivorInner() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'leaderboard' | 'my-entries' | 'rules'>('leaderboard')
+  const [enteredView, setEnteredView] = useState(false)
 
   const bracketLive = new Date() >= BRACKET_RELEASE || (data?.bracketLive === true)
   // Use isTestMode from API (includes test entries in myEntries for preview)
   const isTestMode = data?.isTestMode === true
+
+  // Determine if user can enter pool:
+  // 1. Has real entries (myEntryCount > 0)
+  // 2. OR test mode is enabled (admin preview)
+  const hasEntries = (data?.myEntryCount ?? 0) > 0
+  const canEnterPool = hasEntries || isTestMode
 
   const fetchData = useCallback(async () => {
     try {
@@ -334,13 +341,87 @@ function OfficialSurvivorInner() {
     )
   }
 
-  // Pre-bracket gate
+  // Pre-bracket gate - but show Enter Pool button if user has entries or test mode
   if (!bracketLive) {
     return (
       <div className="px-4 lg:px-8 py-8 max-w-4xl mx-auto space-y-6">
-        <PageHeader totalEntrants={0} currentRound={1} />
+        <PageHeader totalEntrants={data?.totalEntrants ?? 0} currentRound={1} />
         {/* Show prize pool even pre-bracket if we have data */}
         {data && <PrizePoolWidget prizePool={data.prizePool} totalEntrants={data.totalEntrants} />}
+
+        {/* Test mode banner */}
+        {isTestMode && (
+          <div className="rounded-xl p-3 flex items-center gap-3" style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)' }}>
+            <Shield className="w-4 h-4 flex-shrink-0" style={{ color: '#F59E0B' }} />
+            <p className="text-sm font-semibold" style={{ color: '#F59E0B' }}>
+              TEST MODE — You are previewing the contest as admin. This does not affect live contest data.
+            </p>
+          </div>
+        )}
+
+        {/* Enter Pool button - show if user has entries or test mode */}
+        {canEnterPool && (
+          <div className="rounded-2xl p-6 text-center" style={{ background: 'rgba(0,255,163,0.06)', border: '1px solid rgba(0,255,163,0.2)' }}>
+            <Trophy className="w-10 h-10 mx-auto mb-3" style={{ color: '#00FFA3' }} />
+            <h2 className="text-xl font-bold mb-2" style={{ color: '#E6E6FA' }}>
+              {isTestMode ? 'Preview: Enter Pool' : 'Ready to Play'}
+            </h2>
+            <p className="text-sm max-w-md mx-auto mb-4" style={{ color: '#A0A0B0' }}>
+              {isTestMode
+                ? 'You are viewing the contest as an admin preview. This is for testing only.'
+                : 'Your entry is confirmed! Enter the pool to make your picks.'}
+            </p>
+            <Button
+              onClick={() => setEnteredView(true)}
+              className="font-bold"
+              style={{ background: '#00FFA3', color: '#000' }}
+            >
+              Enter Pool
+            </Button>
+          </div>
+        )}
+
+        {!canEnterPool && (
+          <>
+            <div className="rounded-2xl p-10 text-center" style={{ background: '#12122A', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <Clock className="w-12 h-12 mx-auto mb-4" style={{ color: '#F59E0B' }} />
+              <h2 className="text-xl font-bold mb-2" style={{ color: '#E6E6FA' }}>Bracket Releases March 16</h2>
+              <p className="text-sm max-w-md mx-auto" style={{ color: '#A0A0B0' }}>
+                The contest opens on Selection Sunday, March 16, 2026. Entries will be accepted then.
+                The prize pool is live — it grows with every entry purchased.
+              </p>
+            </div>
+            <div className="rounded-2xl p-6" style={{ background: '#12122A', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <RulesSection />
+            </div>
+          </>
+        )}
+      </div>
+    )
+  }
+
+  if (!data) return null
+
+  const { pool, myEntries, myEntryCount, canPurchaseMore, remainingSlots, leaderboard, currentRound, totalEntrants, prizePool } = data
+
+  // If bracket is not live and user hasn't entered (or no test mode), show pre-entry view
+  // But if they have entries or test mode, they can enter via Enter Pool button
+  // Once enteredView is true, show the full entered experience
+  if (!bracketLive && !enteredView) {
+    // This is handled above in the pre-bracket gate
+  }
+
+  // Show entered experience if:
+  // 1. bracketLive is true (tournament started), OR
+  // 2. user clicked Enter Pool (enteredView = true)
+  const showEnteredExperience = bracketLive || enteredView
+
+  // If bracket hasn't started, user hasn't entered, and no test mode - show purchase prompt
+  if (!showEnteredExperience) {
+    return (
+      <div className="px-4 lg:px-8 py-8 max-w-4xl mx-auto space-y-6">
+        <PageHeader totalEntrants={data.totalEntrants} currentRound={1} />
+        <PrizePoolWidget prizePool={data.prizePool} totalEntrants={data.totalEntrants} />
         <div className="rounded-2xl p-10 text-center" style={{ background: '#12122A', border: '1px solid rgba(255,255,255,0.08)' }}>
           <Clock className="w-12 h-12 mx-auto mb-4" style={{ color: '#F59E0B' }} />
           <h2 className="text-xl font-bold mb-2" style={{ color: '#E6E6FA' }}>Bracket Releases March 16</h2>
@@ -355,10 +436,6 @@ function OfficialSurvivorInner() {
       </div>
     )
   }
-
-  if (!data) return null
-
-  const { pool, myEntries, myEntryCount, canPurchaseMore, remainingSlots, leaderboard, currentRound, totalEntrants, prizePool } = data
 
   return (
     <div className="px-4 lg:px-8 py-8 max-w-5xl mx-auto space-y-5">

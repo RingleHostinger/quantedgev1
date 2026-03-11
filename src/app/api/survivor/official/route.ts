@@ -194,13 +194,17 @@ export async function GET(_req: NextRequest) {
   let isTestMode = false
 
   // If admin with test mode enabled, also include test entries for preview
-  if (isAdmin && bracketLive && testBracketData) {
-    isTestMode = true
-    const testEntries = allEntriesList.filter(
+  // Note: testBracketData is optional - we can preview entries even without saved bracket data
+  if (isAdmin && bracketLive) {
+    // Check if admin has test entries
+    const adminTestEntries = allEntriesList.filter(
       (e) => e.user_id === session.userId && (e as Record<string, unknown>).is_test_entry === true
     )
-    // Include test entries in myEntries for preview
-    myEntries = [...myEntries, ...testEntries]
+    if (adminTestEntries.length > 0) {
+      isTestMode = true
+      // Include test entries in myEntries for preview
+      myEntries = [...myEntries, ...adminTestEntries]
+    }
   }
 
   const myEntryCount = myEntries.length
