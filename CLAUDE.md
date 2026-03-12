@@ -37,9 +37,8 @@ src/
 │   ├── dashboard/
 │   │   ├── layout.tsx                # Dashboard layout (sidebar nav + collapse context)
 │   │   ├── page.tsx                  # Dashboard home
-│   │   ├── admin/page.tsx            # Admin panel (multi-tab)
-│   │   ├── official-survivor/page.tsx # Official Survivor contest (visual bracket + game cards)
-│   │   ├── survivor/page.tsx         # Survivor pool builder
+│   │   ├── admin/page.tsx            # Admin panel (multi-tab, includes Official Contest tab)
+│   │   ├── official-survivor/page.tsx # Official Survivor contest (bracket view + game cards + picks)
 │   │   ├── bracket-lab/              # Bracket Lab (builder, analysis, compare)
 │   │   ├── official-picks/page.tsx   # AI daily picks
 │   │   ├── picks/page.tsx            # User picks
@@ -58,19 +57,15 @@ src/
 │   └── api/
 │       ├── auth/                     # Auth routes (login, signup, logout, me)
 │       ├── admin/                    # Admin API routes
-│       │   ├── survivor-bracket/     # Bracket mgmt (load_teams, grade_game, confirm)
-│       │   ├── survivor-test-entry/  # Test entry creation
-│       │   ├── survivor-test-mode/   # Test mode toggle
-│       │   ├── survivor-grade/       # Survivor pick grading
-│       │   ├── official-contest/     # Contest management
+│       │   ├── survivor-contest/     # Official contest admin (bracket, days, games, grading)
 │       │   ├── games/                # Game management
 │       │   ├── predictions/          # Prediction admin
 │       │   ├── pipeline/             # Data pipeline
 │       │   └── ...                   # Other admin routes
-│       ├── survivor/                 # Survivor pool APIs
-│       │   ├── official/             # Official contest (GET/POST)
-│       │   ├── analyze/              # AI analysis
-│       │   └── simulate/             # Monte Carlo simulation
+│       ├── survivor/                 # Official Survivor APIs
+│       │   ├── contest/              # Contest data + user entries/picks (GET)
+│       │   ├── picks/                # Pick submission (POST)
+│       │   └── entries/              # Entry management (GET/POST)
 │       ├── predictions/              # Prediction API
 │       ├── odds/                     # Odds + refresh
 │       ├── brackets/                 # Bracket CRUD + analysis
@@ -79,10 +74,9 @@ src/
 │       └── ...                       # Other API routes
 ├── components/
 │   ├── ui/                           # shadcn/ui components (DO NOT recreate)
-│   ├── AdminBracketEditor.tsx        # Visual bracket editor (edit + grade modes)
-│   ├── ContestStatusHeader.tsx       # Survivor contest status metrics bar
-│   ├── SurvivorBracketView.tsx       # Read-only collapsible bracket display
-│   ├── RoundGameCards.tsx            # Interactive game cards for pick selection
+│   ├── AdminOfficialContest.tsx      # Admin Official Contest tab (bracket, days, games, grading)
+│   ├── SurvivorBracket.tsx           # Read-only bracket display (Bracket Lab style, per-entry highlighting)
+│   ├── SurvivorGameCards.tsx         # Interactive game cards for pick selection
 │   ├── BracketBuilder.tsx            # User bracket builder
 │   ├── BracketMatchup.tsx            # Bracket matchup display
 │   ├── BracketRegion.tsx             # Bracket region component
@@ -94,13 +88,11 @@ src/
 │   ├── use-mobile.tsx                # Mobile detection (<768px)
 │   ├── use-toast.tsx                 # Toast notifications
 │   ├── useAuth.ts                    # Auth state hook
-│   ├── useSidebarCollapse.ts         # Sidebar collapse context (used by Official Survivor)
 │   └── useZoerIframe.ts             # Zoer iframe integration
 ├── lib/
 │   ├── auth.ts                       # Session/auth utilities (getSession)
 │   ├── utils.ts                      # Utilities (cn function)
 │   ├── bracketTypes.ts               # Shared bracket types, constants, helpers
-│   ├── officialContestUtils.ts       # Prize pool calculation
 │   ├── officialPicksService.ts       # Official picks service
 │   ├── prediction-engine.ts          # AI prediction engine
 │   ├── bracket-analysis.ts           # Bracket analysis utilities
@@ -151,7 +143,7 @@ src/
 ### 3.4 Database
 - **Provider:** Supabase (PostgreSQL)
 - **RLS:** Enabled (use client.ts) / Bypassed (use server.ts)
-- **Key Tables:** `users`, `games`, `predictions`, `survivor_pools`, `survivor_picks`, `official_survivor_entries`, `bracket_teams`, `admin_settings`, `brackets`
+- **Key Tables:** `users`, `games`, `predictions`, `survivor_contest`, `survivor_contest_days`, `survivor_contest_games`, `survivor_entries`, `survivor_entry_picks`, `bracket_teams`, `admin_settings`, `brackets`
 - **Types:** Auto-generate with `npx supabase gen types`
 
 ### 3.5 Routing
@@ -159,32 +151,37 @@ src/
 - **Server Components:** Default
 - **Client Components:** Add `'use client'` when needed
 
-### 3.6 Official Survivor Contest
-- **Status:** Implemented (full live contest UI)
-- **User Page:** `/dashboard/official-survivor` — visual bracket, interactive game cards, entry tabs, leaderboard, entry purchase
-- **Admin:** "Official Contest" tab in admin panel
-- **Bracket Editor:** `AdminBracketEditor.tsx` — visual editor with edit mode (4 regions x 16 seeds) and grade mode (game-by-game winner selection with automatic advancement)
-- **Date Gate:** Users see countdown until `2026-03-16T23:00:00Z`; admin test mode bypasses this
-- **Test Mode:** Admin toggle via `admin_settings.survivor_test_mode`; test entries (`is_test_entry=true`) excluded from public stats
-- **Bracket Data Structure:** `{ regions: { [region]: [{seed, name}] }, results: { [roundKey]: { [matchupKey]: { team1, team2, team1Seed, team2Seed, winner } } } }`
-- **Round Keys:** `round64`, `round32`, `sweet16`, `elite8`, `finalFour`, `championship`
-- **Seed Pairings:** `[[1,16],[8,9],[5,12],[4,13],[6,11],[3,14],[7,10],[2,15]]`
-- **Prize Pool:** Calculated via `computePrizePool()` in `officialContestUtils.ts`
-- **Pick Limit:** 1 pick per entry per day (enforced server-side)
-- **Team Reuse Prevention:** Each team can only be picked once per entry across all rounds (client + server enforced)
-- **Shared Types:** `src/lib/bracketTypes.ts` — types (BracketMatchup, OfficialBracketData, RoundCompletionStatus), constants, and helpers (parseMatchupIndex, computeActiveRound, computeRoundCompletion)
-- **Live Contest Components:**
-  - `ContestStatusHeader.tsx` — status metrics bar (current round, entries alive, games done, pick status)
-  - `SurvivorBracketView.tsx` — read-only collapsible bracket display (6 round columns, horizontal scroll)
-  - `RoundGameCards.tsx` — interactive game cards for pick selection (click-to-pick replaces text input)
-- **Sidebar Collapse:** Official Survivor page auto-collapses sidebar for more space via `useSidebarCollapse` context
-- **Active Round Logic:** First round where not all matchups have winners; 7 = tournament complete
-- **Matchup Key Formats:** Admin confirm uses `m0`-`m31`; `parseMatchupIndex()` handles both `m0` and `east_0` formats
+### 3.6 Official Survivor Contest (Rebuilt)
+- **Status:** Implemented (clean rebuild, day-based contest system)
+- **Architecture:** Fully admin-controlled — no payment gating, no countdown timers, no auto-grading
+- **User Page:** `/dashboard/official-survivor` — view-only bracket, day selector tabs, game card picks, entry switcher
+- **Admin:** "Official Contest" tab in admin panel (`AdminOfficialContest.tsx`)
+- **Database Tables (new):**
+  - `survivor_contest` — single-row config (bracket_data jsonb, bracket_confirmed, status: setup/active/completed)
+  - `survivor_contest_days` — admin-created contest days (day_number, round_label, picks_required, status: pending/open/locked/completed, lock_time)
+  - `survivor_contest_games` — games posted by admin for each day (team1/team2 with seeds, region, round_key, winner, is_locked, status: posted/locked/graded)
+  - `survivor_entries` — user entries (user_id, entry_number, status: active/eliminated/winner, eliminated_at_day, last_advanced_day)
+  - `survivor_entry_picks` — per-entry picks per day (entry_id, contest_day_id, game_id, team_name, team_seed, result: pending/won/lost)
+- **Bracket Data Structure:** `{ regions: { [region]: [{seed, name}] }, results: {} }` (results populated by grading)
+- **User-Side Components:**
+  - `SurvivorBracket.tsx` — Bracket Lab-style read-only bracket with per-entry pick highlighting (yellow=pending, green=won, red=lost)
+  - `SurvivorGameCards.tsx` — interactive game cards for click-to-pick selection with pick counter dots, team reuse indicators
+- **Admin-Side Component:**
+  - `AdminOfficialContest.tsx` — collapsible sections: contest status, bracket editor (4 regions x 16 seeds), day management, game posting/grading/locking, entries overview
+- **API Routes:**
+  - `GET /api/survivor/contest` — contest data, days with games, user entries and picks
+  - `POST /api/survivor/picks` — submit/update picks (validates entry ownership, day status, lock time, team reuse, pick count)
+  - `GET/POST /api/survivor/entries` — get or create user entries
+  - `GET/POST /api/admin/survivor-contest` — admin contest management (save_bracket, confirm_bracket, load_teams, create_day, update_day, post_games, grade_game, lock_game, complete_day, activate_contest)
+- **Pick Rules:** Variable picks per day (set by admin via picks_required), team can only be used once per entry across all days (server-enforced)
+- **Grading Flow:** Admin grades game -> picks marked won/lost -> losing entries eliminated -> admin completes day -> surviving entries get last_advanced_day updated
+- **User Experience:** Entry selector dropdown, day tabs with status indicators, game cards, submit button, advancement/elimination toast notifications
+- **No payment, purchase, countdown, or test mode logic**
 
 ### 3.7 Admin Panel
 - **Location:** `/dashboard/admin` (multi-tab)
-- **Tabs:** overview, games, predictions, free-pick, users, visibility, briefing, injuries-admin, overrides, bracket-model, bracket-mgmt, pipeline, grading, survivor-test, survivor-grading, official-contest
-- **Key Admin APIs:** `survivor-bracket` (load_teams, grade_game, confirm, save), `survivor-test-entry`, `survivor-test-mode`, `official-contest`, `games`, `predictions`, `pipeline`
+- **Tabs:** overview, pipeline, grading, free-pick, games, predictions, visibility, briefing, injuries-admin, overrides, bracket-model, bracket-mgmt, users, official-contest
+- **Key Admin APIs:** `survivor-contest` (bracket/day/game/grading management), `games`, `predictions`, `pipeline`
 
 ### 3.8 Prediction Engine
 - **Location:** `src/lib/prediction-engine.ts`
@@ -271,14 +268,12 @@ const isMobile = useMobile() // true if < 768px
 - AI prediction engine with model performance tracking
 - Official daily picks (1 pick/day per user)
 - Bracket Lab (builder, analysis, comparison)
-- Official Survivor contest (entries, picks, leaderboard, prize pool)
-- Official Survivor live contest UI (visual bracket, interactive game cards, round progression)
-- Sidebar collapse context for full-width views (Official Survivor)
-- Team reuse prevention (client + server enforced)
-- Visual bracket editor for admin (edit mode + grade mode)
-- Admin test mode for previewing survivor contest before go-live
-- Test data isolation (test entries excluded from public metrics)
-- Game-by-game grading with automatic winner advancement
+- Official Survivor contest (rebuilt: day-based system, admin-controlled, no payment gating)
+- Survivor bracket view (Bracket Lab style, per-entry pick highlighting)
+- Survivor game cards (click-to-pick, team reuse prevention, pick counter)
+- Admin Official Contest panel (bracket editor, day/game management, grading, entries)
+- Multiple entries per user with per-entry tracking
+- Automatic elimination on loss, advancement tracking on day completion
 - Betting edges, heatmap, injury reports
 - Stripe payment integration
 - Theme system (light/dark mode)
@@ -312,12 +307,14 @@ NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=
 - `users` — User accounts with role field (admin/user)
 - `games` — Sports games with odds data
 - `predictions` — AI model predictions
-- `survivor_pools` — Survivor pool configuration (official pool has `is_official=true`)
-- `survivor_picks` — Individual picks with result tracking (pending/won/eliminated)
-- `official_survivor_entries` — Contest entries with `is_test_entry` flag
+- `survivor_contest` — Single-row contest config (bracket_data, bracket_confirmed, status)
+- `survivor_contest_days` — Contest days with round_label, picks_required, status, lock_time
+- `survivor_contest_games` — Games posted by admin per day (teams, seeds, region, winner, is_locked)
+- `survivor_entries` — User entries (entry_number, status: active/eliminated/winner)
+- `survivor_entry_picks` — Per-entry picks per day (team_name, team_seed, result: pending/won/lost)
 - `bracket_teams` — Tournament team data by region and seed
 - `brackets` — User bracket builds
-- `admin_settings` — Key-value admin config (test mode, live mode, etc.)
+- `admin_settings` — Key-value admin config
 
 ---
 
@@ -355,3 +352,4 @@ Before modifying files:
 
 - **2026-03-11**: Added visual bracket editor (AdminBracketEditor), game-by-game grading, admin test mode preview, test data isolation (`is_test_entry` column), updated survivor APIs with bracketLive/isAdmin flags, integrated bracket editor into admin page replacing JSON textarea
 - **2026-03-11**: Added Official Survivor live contest experience — visual bracket display (SurvivorBracketView), interactive game cards (RoundGameCards), contest status header (ContestStatusHeader), shared bracket types (bracketTypes.ts), sidebar collapse context (useSidebarCollapse), team reuse prevention, round progression logic. Replaced text-input pick forms with click-to-pick game card UI.
+- **2026-03-12**: Complete rebuild of Official Survivor system. Removed all old survivor code (AdminBracketEditor, ContestStatusHeader, SurvivorBracketView, RoundGameCards, useSidebarCollapse, officialContestUtils, old API routes). Created new day-based contest system with 5 new database tables (survivor_contest, survivor_contest_days, survivor_contest_games, survivor_entries, survivor_entry_picks). Built new components: SurvivorBracket.tsx (Bracket Lab-style view-only bracket), SurvivorGameCards.tsx (interactive pick cards), AdminOfficialContest.tsx (full admin control panel). Built new API routes: /api/survivor/contest, /api/survivor/picks, /api/survivor/entries, /api/admin/survivor-contest. No payment gating, no countdown timers, fully admin-controlled day-by-day contest flow.

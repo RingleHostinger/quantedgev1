@@ -14,7 +14,6 @@ import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
 import { QuantEdgeLogo } from '@/components/QuantEdgeLogo'
 import { DataFreshnessIndicator } from '@/components/DataFreshnessIndicator'
-import { SidebarCollapseContext } from '@/hooks/useSidebarCollapse'
 import Image from 'next/image'
 
 const navItems = [
@@ -23,7 +22,6 @@ const navItems = [
   { href: '/dashboard/edges', label: 'Top AI Edges', icon: Zap },
   { href: '/dashboard/heatmap', label: 'Betting Heat Map', icon: BarChart2 },
   { href: '/dashboard/picks', label: 'Predictions', icon: Target },
-  { href: '/dashboard/survivor', label: 'Survivor Pool AI', icon: Trophy },
   { href: '/dashboard/upset', label: 'Upset Radar', icon: AlertOctagon },
   { href: '/dashboard/injuries', label: 'Injuries', icon: AlertTriangle },
   { href: '/dashboard/model-performance', label: 'Model Performance', icon: TrendingUp },
@@ -33,8 +31,8 @@ const navItems = [
 ]
 
 const ncaabNavItems = [
+  { href: '/dashboard/official-survivor', label: 'Official Survivor', icon: Trophy, badge: 'LIVE' },
   { href: '/dashboard/bracket-lab', label: 'Bracket Lab', icon: FlaskConical, badge: 'NEW' },
-  { href: '/dashboard/official-survivor', label: 'Official Survivor', icon: Trophy },
 ]
 
 const adminNavItems = [
@@ -46,12 +44,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const pathname = usePathname()
   const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-
-  const sidebarCollapseValue = useMemo(
-    () => ({ collapsed: sidebarCollapsed, setCollapsed: setSidebarCollapsed }),
-    [sidebarCollapsed]
-  )
 
   useEffect(() => {
     if (!loading && !user) {
@@ -234,17 +226,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   )
 
   return (
-    <SidebarCollapseContext.Provider value={sidebarCollapseValue}>
     <div className="flex h-screen" style={{ background: '#0F0F1A' }}>
       {/* Desktop sidebar */}
-      {!sidebarCollapsed && (
-        <aside
-          className="hidden lg:flex flex-col w-64 border-r flex-shrink-0"
-          style={{ background: '#0C0C18', borderColor: 'rgba(255,255,255,0.07)' }}
-        >
-          <SidebarContent />
-        </aside>
-      )}
+      <aside
+        className="hidden lg:flex flex-col w-64 border-r flex-shrink-0"
+        style={{ background: '#0C0C18', borderColor: 'rgba(255,255,255,0.07)' }}
+      >
+        <SidebarContent />
+      </aside>
 
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
@@ -277,17 +266,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </button>
             <QuantEdgeLogo variant="full" width={130} href="/dashboard" />
           </div>
-
-          {/* Desktop: show menu button when sidebar collapsed */}
-          {sidebarCollapsed && (
-            <button
-              onClick={() => setSidebarCollapsed(false)}
-              className="hidden lg:flex p-2 rounded-lg hover:bg-white/5 items-center gap-2"
-              style={{ color: '#A0A0B0' }}
-            >
-              <Menu className="w-5 h-5" />
-            </button>
-          )}
 
           {/* Desktop: current page label */}
           <div className="hidden lg:block">
@@ -330,6 +308,5 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </main>
       </div>
     </div>
-    </SidebarCollapseContext.Provider>
   )
 }

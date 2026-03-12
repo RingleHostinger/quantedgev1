@@ -1,712 +1,498 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import {
-  Trophy, CheckCircle, XCircle, AlertCircle, Lock, Unlock,
-} from 'lucide-react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
+import { Trophy, ChevronDown, AlertTriangle, CheckCircle, XCircle, ExternalLink, PartyPopper } from 'lucide-react'
+import { SurvivorBracket } from '@/components/SurvivorBracket'
+import { SurvivorGameCards, SurvivorGame } from '@/components/SurvivorGameCards'
 import { Button } from '@/components/ui/button'
-import { useSidebarCollapse } from '@/hooks/useSidebarCollapse'
-import { SurvivorBracketView } from '@/components/SurvivorBracketView'
-import { RoundGameCards, type PickSelection } from '@/components/RoundGameCards'
-import {
-  type OfficialBracketData,
-  type BracketMatchup,
-  ROUND_LABELS,
-  roundNumberToKey,
-} from '@/lib/bracketTypes'
+import { useToast } from '@/hooks/use-toast'
 
-// ─── Types ─────────────────────────────────────────────────────────────────
-
-interface SurvivorPickRow {
+interface ContestDay {
   id: string
-  round_number: number
+  day_number: number
+  round_label: string
+  picks_required: number
+  status: string // pending | open | locked | completed
+  lock_time: string | null
+  games: SurvivorGame[]
+}
+
+interface Entry {
+  id: string
+  entry_number: number
+  status: string // active | eliminated | winner
+  eliminated_at_day: number | null
+  last_advanced_day: number
+}
+
+interface EntryPick {
+  id: string
+  entry_id: string
+  contest_day_id: string
+  game_id: string
   team_name: string
-  team_seed: number | null
-  opponent_name: string | null
-  result: 'pending' | 'won' | 'eliminated'
-  picked_at: string
-  contest_day: number | null
+  team_seed: number
+  result: string
 }
 
-interface LeaderboardRow {
-  rank: number
-  entryId: string
-  userId: string
-  entryNumber: number
-  displayName: string
-  status: 'alive' | 'eliminated'
-  roundsSurvived: number
-  picksCorrect: number
-  currentRound: number
-  picks: SurvivorPickRow[]
-  createdAt: string
+interface ContestData {
+  contest: {
+    id: string
+    bracket_data: Record<string, unknown>
+    bracket_confirmed: boolean
+    status: string
+  } | null
+  days: ContestDay[]
+  entries: Entry[]
+  picks: EntryPick[]
 }
-
-interface Pool {
-  id: string
-  pool_name: string
-  is_active: boolean
-  bracket_data: OfficialBracketData | null
-}
-
-interface OfficialData {
-  pool: Pool
-  myEntries: LeaderboardRow[]
-  leaderboard: LeaderboardRow[]
-  currentRound: number
-  totalEntrants: number
-  bracketData?: OfficialBracketData
-  roundCompletionStatus?: Record<string, { total: number; completed: number; allDone: boolean }>
-  activeRound?: number
-  isAdmin?: boolean
-  roundStates?: Record<string, string>
-  activeContestDay?: number
-}
-
-// ─── Main Component ────────────────────────────────────────────────────────
 
 export default function OfficialSurvivorPage() {
-  const { setCollapsed } = useSidebarCollapse()
-
-  const [data, setData] = useState<OfficialData | null>(null)
+  const { toast } = useToast()
+  const [data, setData] = useState<ContestData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [isAdmin, setIsAdmin] = useState(false)
+  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null)
+  const [selectedDayId, setSelectedDayId] = useState<string | null>(null)
+  const [localPicks, setLocalPicks] = useState<Record<string, { team_name: string; team_seed: number }>>({}) // game_id -> pick
+  const [submitting, setSubmitting] = useState(false)
+  const [showEntryDropdown, setShowEntryDropdown] = useState(false)
+  const [shownPopups, setShownPopups] = useState<Set<string>>(new Set())
 
-  // State for picks - array to support multiple picks per day
-  const [activeEntryIndex, setActiveEntryIndex] = useState(0)
-  const [pendingPicks, setPendingPicks] = useState<Record<string, PickSelection[]>>({})
-  const [selectedContestDay, setSelectedContestDay] = useState<number | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
-  const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
-  const [creatingEntry, setCreatingEntry] = useState(false)
-
-  // Popup states
-  const [showPopup, setShowPopup] = useState(false)
-  const [popupType, setPopupType] = useState<'advance' | 'eliminated' | null>(null)
-  const [popupRound, setPopupRound] = useState<number | null>(null)
-  const [previousStatus, setPreviousStatus] = useState<Record<string, 'alive' | 'eliminated'>>({})
-
-  // Auto-collapse sidebar on mount
-  useEffect(() => {
-    setCollapsed(true)
-    return () => setCollapsed(false)
-  }, [setCollapsed])
-
-  // Fetch data
-  const fetchData = async () => {
-    setLoading(true)
-    setError(null)
+  const loadData = useCallback(async () => {
     try {
-      const res = await fetch('/api/survivor/official')
-      if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.error || 'Failed to load')
-      }
-      const result = await res.json()
-      setData(result)
-      setIsAdmin(result.isAdmin || false)
-
-      // Check for advancement or elimination changes
-      if (result.myEntries && result.myEntries.length > 0) {
-        const currentStatus: Record<string, 'alive' | 'eliminated'> = {}
-        result.myEntries.forEach((e: LeaderboardRow) => {
-          currentStatus[e.entryId] = e.status
-        })
-
-        // Compare with previous status to detect changes
-        if (Object.keys(previousStatus).length > 0) {
-          const currentRound = result.currentRound || 1
-          result.myEntries.forEach((e: LeaderboardRow) => {
-            const prevStatus = previousStatus[e.entryId]
-            const currStatus = e.status
-            const prevRound = result.activeRound || currentRound
-
-            // Entry eliminated
-            if (prevStatus === 'alive' && currStatus === 'eliminated') {
-              setPopupType('eliminated')
-              setPopupRound(prevRound)
-              setShowPopup(true)
-              setTimeout(() => setShowPopup(false), 5000)
-            }
-            // Entry advanced to next round
-            else if (prevStatus === 'alive' && currStatus === 'alive') {
-              // Check if they survived this round
-              const survivedRound = e.picks?.some((p: SurvivorPickRow) => p.round_number === prevRound && p.result === 'won')
-              if (survivedRound) {
-                setPopupType('advance')
-                setPopupRound(prevRound + 1)
-                setShowPopup(true)
-                setTimeout(() => setShowPopup(false), 5000)
-              }
-            }
-          })
+      const res = await fetch('/api/survivor/contest')
+      const json = await res.json()
+      if (res.ok) {
+        setData(json)
+        // Auto-select first entry if none selected
+        if (!selectedEntryId && json.entries?.length > 0) {
+          setSelectedEntryId(json.entries[0].id)
         }
-
-        setPreviousStatus(currentStatus)
+        // Auto-select active day
+        if (!selectedDayId && json.days?.length > 0) {
+          const openDay = json.days.find((d: ContestDay) => d.status === 'open')
+          const lastCompleted = [...json.days].reverse().find((d: ContestDay) => d.status === 'completed')
+          setSelectedDayId(openDay?.id || lastCompleted?.id || json.days[0].id)
+        }
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error')
-    } finally {
-      setLoading(false)
-    }
-  }
+    } catch { /* ignore */ }
+    finally { setLoading(false) }
+  }, [selectedEntryId, selectedDayId])
 
-  // Create test entry (for admin testing)
-  const createTestEntry = async (entryNumber: number = 1) => {
-    setCreatingEntry(true)
-    try {
-      const res = await fetch('/api/survivor/official', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'create_test_entry', entry_number: entryNumber }),
+  useEffect(() => { loadData() }, [loadData])
+
+  // Selected entry
+  const selectedEntry = useMemo(
+    () => data?.entries?.find(e => e.id === selectedEntryId) ?? null,
+    [data, selectedEntryId]
+  )
+
+  // Picks for selected entry
+  const entryPicks = useMemo(
+    () => data?.picks?.filter(p => p.entry_id === selectedEntryId) ?? [],
+    [data, selectedEntryId]
+  )
+
+  // Used teams for selected entry (from completed/locked days only)
+  const usedTeams = useMemo(() => {
+    if (!selectedDayId) return [] as string[]
+    const currentDay = data?.days?.find(d => d.id === selectedDayId)
+    return entryPicks
+      .filter(p => {
+        const pickDay = data?.days?.find(d => d.id === p.contest_day_id)
+        return pickDay && pickDay.day_number !== currentDay?.day_number
       })
-      if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.error || 'Failed to create entry')
-      }
-      // Refresh data
-      fetchData()
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Failed to create entry')
-    } finally {
-      setCreatingEntry(false)
-    }
-  }
+      .map(p => p.team_name)
+  }, [entryPicks, selectedDayId, data])
 
-  // Create free entry (for regular users)
-  const createEntry = async () => {
-    setCreatingEntry(true)
-    try {
-      const res = await fetch('/api/survivor/official', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'create_entry' }),
-      })
-      if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.error || 'Failed to create entry')
-      }
-      // Refresh data
-      fetchData()
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Failed to create entry')
-    } finally {
-      setCreatingEntry(false)
-    }
-  }
+  // Selected day
+  const selectedDay = useMemo(
+    () => data?.days?.find(d => d.id === selectedDayId) ?? null,
+    [data, selectedDayId]
+  )
 
+  // Current day's existing picks for this entry
+  const dayPicks = useMemo(
+    () => entryPicks.filter(p => p.contest_day_id === selectedDayId),
+    [entryPicks, selectedDayId]
+  )
+
+  // Initialize local picks from saved picks when day changes
   useEffect(() => {
-    fetchData()
-  }, [])
+    const newLocal: Record<string, { team_name: string; team_seed: number }> = {}
+    dayPicks.forEach(p => {
+      newLocal[p.game_id] = { team_name: p.team_name, team_seed: p.team_seed }
+    })
+    setLocalPicks(newLocal)
+  }, [dayPicks])
 
-  // Loading state
+  // Check for advancement popups
+  useEffect(() => {
+    if (!selectedEntry || !data?.days) return
+    if (selectedEntry.status === 'eliminated' && !shownPopups.has(`elim_${selectedEntry.id}`)) {
+      setShownPopups(prev => new Set([...prev, `elim_${selectedEntry.id}`]))
+      toast({
+        title: 'Entry Eliminated',
+        description: `Entry #${selectedEntry.entry_number} has been eliminated.`,
+        variant: 'destructive',
+      })
+    }
+    // Check for advancement
+    const completedDays = data.days.filter(d => d.status === 'completed').length
+    if (
+      selectedEntry.status === 'active' &&
+      completedDays > 0 &&
+      completedDays > selectedEntry.last_advanced_day &&
+      !shownPopups.has(`adv_${selectedEntry.id}_${completedDays}`)
+    ) {
+      setShownPopups(prev => new Set([...prev, `adv_${selectedEntry.id}_${completedDays}`]))
+      const nextDay = data.days.find(d => d.day_number === completedDays + 1)
+      if (nextDay) {
+        toast({
+          title: 'You Advanced!',
+          description: `Entry #${selectedEntry.entry_number} survived! Welcome to ${nextDay.round_label}.`,
+        })
+      }
+    }
+  }, [selectedEntry, data, shownPopups, toast])
+
+  const handleSelectTeam = useCallback((gameId: string, teamName: string, teamSeed: number) => {
+    setLocalPicks(prev => {
+      const next = { ...prev }
+      // If same team already selected, deselect
+      if (next[gameId]?.team_name === teamName) {
+        delete next[gameId]
+        return next
+      }
+      // If another team in this game selected, replace
+      // Check pick limit
+      const currentCount = Object.keys(next).filter(k => k !== gameId).length
+      const maxPicks = selectedDay?.picks_required ?? 1
+      if (currentCount >= maxPicks && !next[gameId]) {
+        // At limit, remove oldest pick to make room
+        return next
+      }
+      next[gameId] = { team_name: teamName, team_seed: teamSeed }
+      return next
+    })
+  }, [selectedDay])
+
+  const handleSubmitPicks = async () => {
+    if (!selectedEntryId || !selectedDayId) return
+    const picks = Object.entries(localPicks).map(([game_id, { team_name, team_seed }]) => ({
+      game_id,
+      team_name,
+      team_seed,
+    }))
+    setSubmitting(true)
+    try {
+      const res = await fetch('/api/survivor/picks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entry_id: selectedEntryId, contest_day_id: selectedDayId, picks }),
+      })
+      const json = await res.json()
+      if (res.ok) {
+        toast({ title: 'Picks Submitted', description: 'Your picks have been saved.' })
+        await loadData()
+      } else {
+        toast({ title: 'Error', description: json.error || 'Failed to submit picks', variant: 'destructive' })
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Failed to submit picks', variant: 'destructive' })
+    }
+    finally { setSubmitting(false) }
+  }
+
+  const selectedTeamNames = useMemo(
+    () => Object.values(localPicks).map(p => p.team_name),
+    [localPicks]
+  )
+
+  const isLocked = selectedDay?.status === 'locked' || selectedDay?.status === 'completed'
+  const isEntryEliminated = selectedEntry?.status === 'eliminated'
+  const picksDisabled = isLocked || isEntryEliminated
+  const canSubmit =
+    !picksDisabled &&
+    selectedTeamNames.length === (selectedDay?.picks_required ?? 1) &&
+    !submitting
+
+  // Lock timer display
+  const lockTimeStr = selectedDay?.lock_time
+    ? new Date(selectedDay.lock_time).toLocaleString()
+    : null
+
+  // Bracket pick highlights for the selected entry
+  const bracketPickHighlights = useMemo(
+    () => entryPicks.map(p => ({ team_name: p.team_name, result: p.result })),
+    [entryPicks]
+  )
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="text-center space-y-3">
-          <div className="w-8 h-8 border-2 border-t-transparent border-green-500 rounded-full animate-spin mx-auto" style={{ borderTopColor: 'transparent' }} />
-          <p className="text-sm font-medium" style={{ color: '#A0A0B0' }}>Loading Official Survivor...</p>
+      <div className="p-6 flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <div className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin mx-auto mb-3"
+            style={{ borderColor: 'rgba(0,255,163,0.3)', borderTopColor: 'transparent' }} />
+          <p className="text-sm" style={{ color: '#6B6B80' }}>Loading contest...</p>
         </div>
       </div>
     )
   }
 
-  // Error state
-  if (error) {
+  if (!data?.contest) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="text-center space-y-3">
-          <XCircle className="w-10 h-10 mx-auto" style={{ color: '#F87171' }} />
-          <p className="text-sm font-medium" style={{ color: '#F87171' }}>{error}</p>
-          <Button size="sm" variant="outline" onClick={fetchData}>Retry</Button>
+      <div className="p-6">
+        <div className="text-center py-20 rounded-xl"
+          style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+          <Trophy className="w-12 h-12 mx-auto mb-4" style={{ color: '#6B6B80' }} />
+          <h2 className="text-xl font-bold mb-2" style={{ color: '#E0E0E8' }}>Official Survivor</h2>
+          <p className="text-sm" style={{ color: '#6B6B80' }}>
+            The contest has not been set up yet. Check back soon!
+          </p>
         </div>
       </div>
     )
   }
-
-  if (!data) return null
-
-  // ─── Extract data ───────────────────────────────────────────────────────
-  const { pool, myEntries, leaderboard, currentRound, totalEntrants, bracketData, activeRound: apiActiveRound, activeContestDay: apiContestDay } = data
-
-  const activeRound = apiActiveRound ?? currentRound
-  const activeContestDay = apiContestDay ?? 1
-  const activeRoundKey = roundNumberToKey(activeRound)
-  const activeRoundMatchups = (bracketData?.results?.[activeRoundKey] ?? {}) as Record<string, BracketMatchup>
-
-  // Current entry
-  const currentEntry = myEntries[activeEntryIndex] ?? myEntries[0]
-  const currentEntryId = currentEntry?.entryId
-  const isEntryEliminated = currentEntry?.status === 'eliminated'
-
-  // Determine if current entry already has a pick for the active round
-  const existingPick = currentEntry?.picks.find((p) => p.round_number === activeRound)
-  const hasSubmittedPick = existingPick != null
-
-  // Calculate picks for current contest day (use selected day if set, otherwise active day)
-  const effectiveContestDay = selectedContestDay ?? activeContestDay
-  const doublePickDays = [1, 2, 7, 8]
-  const maxPicksPerDay = doublePickDays.includes(effectiveContestDay) ? 2 : 1
-  const currentDayPicks = currentEntry?.picks.filter((p) => p.contest_day === effectiveContestDay && p.result === 'pending') ?? []
-  const picksUsedToday = currentDayPicks.length
-  const picksRemainingToday = maxPicksPerDay - picksUsedToday
-
-  // Current pending picks for this entry and day
-  const currentPicks = currentEntryId ? (pendingPicks[currentEntryId] ?? []) : []
-  const hasPendingPick = currentPicks.length > 0
-  const pendingPicksUsedToday = currentPicks.length
-
-  // Count alive entries
-  const aliveEntrants = leaderboard.filter((r) => r.status === 'alive').length
-  const myAliveEntries = myEntries.filter((e) => e.status === 'alive').length
-
-  // Handle team selection - supports multiple picks per day
-  const handleTeamSelect = (selection: PickSelection) => {
-    if (!currentEntryId || isEntryEliminated || isCurrentRoundLocked) return
-    // Check if this team is already selected
-    if (currentPicks.some(p => p.teamName === selection.teamName)) return
-    // Check if picks remaining today (including pending)
-    const totalPicksUsed = picksUsedToday + pendingPicksUsedToday
-    if (totalPicksUsed >= maxPicksPerDay) return
-    setPendingPicks(prev => ({
-      ...prev,
-      [currentEntryId]: [...(prev[currentEntryId] ?? []), selection]
-    }))
-    setSaveError(null)
-    setSaveSuccess(null)
-  }
-
-  // Save all pending picks
-  const handleSavePick = async () => {
-    if (!currentEntryId || currentPicks.length === 0) return
-
-    setSaving(true)
-    setSaveError(null)
-    setSaveSuccess(null)
-
-    try {
-      // Save each pick one by one
-      for (const pick of currentPicks) {
-        const res = await fetch('/api/survivor/official', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            entry_id: currentEntryId,
-            round_number: activeRound,
-            team_name: pick.teamName,
-            team_seed: pick.teamSeed,
-            opponent_name: pick.opponentName,
-            opponent_seed: pick.opponentSeed,
-          }),
-        })
-
-        if (!res.ok) {
-          const err = await res.json()
-          throw new Error(err.error || 'Failed to save pick')
-        }
-      }
-
-      // Clear pending picks and refetch
-      setPendingPicks(prev => ({ ...prev, [currentEntryId]: [] }))
-      setSaveSuccess(`Successfully submitted ${currentPicks.length} pick(s)!`)
-      fetchData()
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Unknown error')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  // Get user's picks for bracket highlighting
-  const userPicks = currentEntry?.picks ?? []
-
-  // Get round states
-  const roundStates = data?.roundStates || {
-    round64: 'open',
-    round32: 'open',
-    sweet16: 'open',
-    elite8: 'open',
-    finalFour: 'open',
-    championship: 'open',
-  }
-
-  // Check if current round is locked
-  const currentRoundKey = roundNumberToKey[activeRound]
-  const currentRoundState = currentRoundKey ? roundStates[currentRoundKey] : 'open'
-  const isCurrentRoundLocked = currentRoundState === 'closed' || currentRoundState === 'graded'
 
   return (
-    <div className="px-4 lg:px-6 py-6 max-w-7xl mx-auto space-y-4">
-      {/* Advancement/Elimination Popup */}
-      {showPopup && popupType && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
-          <div
-            className="rounded-2xl px-8 py-6 text-center pointer-events-auto animate-bounce"
-            style={{
-              background: popupType === 'advance' ? 'rgba(0,255,163,0.15)' : 'rgba(248,113,113,0.15)',
-              border: `2px solid ${popupType === 'advance' ? 'rgba(0,255,163,0.5)' : 'rgba(248,113,113,0.5)'}`,
-            }}
-          >
-            {popupType === 'advance' ? (
-              <div>
-                <p className="text-2xl mb-1">🎉 Welcome to Round {popupRound} 🎉</p>
-                <p className="text-sm" style={{ color: '#00FFA3' }}>Your entry survived!</p>
-              </div>
-            ) : (
-              <div>
-                <p className="text-2xl mb-1">😢 Eliminated</p>
-                <p className="text-sm" style={{ color: '#F87171' }}>Your entry has been eliminated from the pool.</p>
+    <div className="p-4 lg:p-6 space-y-6 max-w-[1600px] mx-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <h1 className="text-xl lg:text-2xl font-bold" style={{ color: '#E0E0E8' }}>
+              Official Survivor
+            </h1>
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded"
+              style={{ background: 'rgba(0,255,163,0.1)', color: '#00FFA3' }}>
+              Powered by Sponsor
+            </span>
+          </div>
+          <p className="text-xs" style={{ color: '#6B6B80' }}>
+            Pick teams each day. If your pick loses, your entry is eliminated.
+          </p>
+        </div>
+
+        {/* Entry selector */}
+        {data.entries.length > 0 && (
+          <div className="relative">
+            <button
+              onClick={() => setShowEntryDropdown(!showEntryDropdown)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
+              style={{
+                background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                color: '#E0E0E8',
+              }}
+            >
+              <Trophy className="w-4 h-4" style={{ color: selectedEntry?.status === 'eliminated' ? '#EF4444' : '#00FFA3' }} />
+              Entry #{selectedEntry?.entry_number ?? 1}
+              {selectedEntry?.status === 'eliminated' && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(239,68,68,0.15)', color: '#EF4444' }}>
+                  OUT
+                </span>
+              )}
+              {selectedEntry?.status === 'active' && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(0,255,163,0.15)', color: '#00FFA3' }}>
+                  ALIVE
+                </span>
+              )}
+              <ChevronDown className="w-4 h-4" style={{ color: '#6B6B80' }} />
+            </button>
+            {showEntryDropdown && (
+              <div
+                className="absolute right-0 top-full mt-1 z-50 rounded-lg py-1 min-w-[180px]"
+                style={{ background: '#1A1A2E', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}
+              >
+                {data.entries.map(entry => (
+                  <button
+                    key={entry.id}
+                    onClick={() => { setSelectedEntryId(entry.id); setShowEntryDropdown(false) }}
+                    className="flex items-center gap-2 w-full px-4 py-2 text-sm hover:bg-white/5"
+                    style={{ color: entry.id === selectedEntryId ? '#00FFA3' : '#C0C0D0' }}
+                  >
+                    <Trophy className="w-3.5 h-3.5"
+                      style={{ color: entry.status === 'eliminated' ? '#EF4444' : entry.status === 'winner' ? '#F59E0B' : '#00FFA3' }} />
+                    Entry #{entry.entry_number}
+                    <span className="ml-auto text-[10px]" style={{
+                      color: entry.status === 'eliminated' ? '#EF4444' : entry.status === 'winner' ? '#F59E0B' : '#00FFA3'
+                    }}>
+                      {entry.status.toUpperCase()}
+                    </span>
+                  </button>
+                ))}
               </div>
             )}
           </div>
+        )}
+      </div>
+
+      {/* Bracket */}
+      {data.contest.bracket_confirmed && (
+        <div className="relative">
+          <SurvivorBracket
+            bracketData={data.contest.bracket_data as { regions?: Record<string, Array<{ seed: number; name: string }>>; results?: Record<string, Record<string, { team1: string; team2: string; team1Seed: number; team2Seed: number; winner?: string }>> }}
+            entryPicks={bracketPickHighlights}
+          />
+          {/* Sponsor button */}
+          <div className="flex justify-center mt-3">
+            <button
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition-all hover:opacity-80"
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#6B6B80' }}
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              Branding / Link Here
+            </button>
+          </div>
         </div>
       )}
 
-      {/* Rest of the UI */}
-
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Trophy className="w-6 h-6" style={{ color: '#00FFA3' }} />
+      {/* Eliminated banner */}
+      {isEntryEliminated && (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
+          style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
+          <XCircle className="w-5 h-5 shrink-0" style={{ color: '#EF4444' }} />
           <div>
-            <h1 className="text-xl font-bold" style={{ color: '#E6E6FA' }}>Official Survivor</h1>
-            <p className="text-xs" style={{ color: '#6B6B80' }}>
-              Powered by <span style={{ color: '#A0A0B0' }}>Sponsor</span>
-            </p>
+            <p className="text-sm font-semibold" style={{ color: '#EF4444' }}>Entry #{selectedEntry?.entry_number} Eliminated</p>
+            <p className="text-xs" style={{ color: '#A0A0B0' }}>This entry can no longer make picks. Switch to another entry if available.</p>
           </div>
         </div>
+      )}
 
-        {/* Round Status with Contest Day Context */}
-        <div className="flex flex-col items-end gap-2">
-          <div className="text-xs px-3 py-1 rounded-full font-medium"
-            style={{ background: 'rgba(245,158,11,0.15)', color: '#F59E0B' }}>
-            Day {activeContestDay} of 10
+      {/* Pick Area */}
+      {data.days.length > 0 && (
+        <div className="space-y-4">
+          {/* Day header */}
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <h2 className="text-lg font-bold" style={{ color: '#E0E0E8' }}>
+                {selectedDay?.round_label ?? 'Picks'} — Day {selectedDay?.day_number ?? ''}
+              </h2>
+              {lockTimeStr && selectedDay?.status === 'open' && (
+                <p className="text-xs mt-0.5" style={{ color: '#F59E0B' }}>
+                  Picks lock: {lockTimeStr}
+                </p>
+              )}
+              {selectedDay?.status === 'locked' && (
+                <p className="text-xs mt-0.5 flex items-center gap-1" style={{ color: '#F59E0B' }}>
+                  <AlertTriangle className="w-3 h-3" /> Picks are locked for this day
+                </p>
+              )}
+              {selectedDay?.status === 'completed' && (
+                <p className="text-xs mt-0.5 flex items-center gap-1" style={{ color: '#00FFA3' }}>
+                  <CheckCircle className="w-3 h-3" /> Day completed
+                </p>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            {Object.entries(roundStates).map(([key, state]) => {
-              // Map round key to contest day range for tooltip
-              const dayRange: Record<string, string> = {
-                round64: 'Days 1-2',
-                round32: 'Days 3-4',
-                sweet16: 'Days 5-6',
-                elite8: 'Days 7-8',
-                finalFour: 'Day 9',
-                championship: 'Day 10',
+
+          {/* Day selector tabs */}
+          <div className="flex gap-2 flex-wrap">
+            {data.days.map(day => {
+              const isActive = day.id === selectedDayId
+              const dayEntryPicks = entryPicks.filter(p => p.contest_day_id === day.id)
+              const hasSubmitted = dayEntryPicks.length > 0
+              const dayHasLoss = dayEntryPicks.some(p => p.result === 'lost')
+              const dayAllWon = dayEntryPicks.length > 0 && dayEntryPicks.every(p => p.result === 'won')
+
+              let tabBg = 'rgba(255,255,255,0.04)'
+              let tabBorder = '1px solid rgba(255,255,255,0.08)'
+              let tabColor = '#A0A0B0'
+
+              if (isActive) {
+                tabBg = 'rgba(0,255,163,0.1)'
+                tabBorder = '1px solid rgba(0,255,163,0.3)'
+                tabColor = '#00FFA3'
+              } else if (dayHasLoss) {
+                tabBg = 'rgba(239,68,68,0.08)'
+                tabBorder = '1px solid rgba(239,68,68,0.15)'
+                tabColor = '#EF4444'
+              } else if (dayAllWon) {
+                tabBg = 'rgba(0,255,163,0.06)'
+                tabBorder = '1px solid rgba(0,255,163,0.15)'
+                tabColor = '#00FFA3'
               }
+
               return (
-                <span
-                  key={key}
-                  className="text-xs px-2 py-1 rounded font-medium"
-                  style={{
-                    background: state === 'graded' ? 'rgba(239,68,68,0.15)' : state === 'closed' ? 'rgba(250,204,21,0.15)' : 'rgba(0,255,163,0.15)',
-                    color: state === 'graded' ? '#EF4444' : state === 'closed' ? '#EAB308' : '#22C55E',
-                  }}
-                  title={`${dayRange[key] || key}: ${state}`}
+                <button
+                  key={day.id}
+                  onClick={() => setSelectedDayId(day.id)}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold transition-all"
+                  style={{ background: tabBg, border: tabBorder, color: tabColor }}
                 >
-                  {key === 'round64' ? 'R64' : key === 'round32' ? 'R32' : key === 'sweet16' ? 'S16' : key === 'elite8' ? 'E8' : key === 'finalFour' ? 'F4' : 'CH'}:{state === 'graded' ? 'X' : state === 'closed' ? '-' : '✓'}
-                </span>
+                  <div>Day {day.day_number}</div>
+                  <div className="text-[9px] mt-0.5 font-normal opacity-70">
+                    {day.round_label}
+                  </div>
+                  {hasSubmitted && day.status !== 'pending' && (
+                    <div className="mt-1">
+                      {dayHasLoss ? (
+                        <XCircle className="w-3 h-3 mx-auto" style={{ color: '#EF4444' }} />
+                      ) : dayAllWon ? (
+                        <CheckCircle className="w-3 h-3 mx-auto" style={{ color: '#00FFA3' }} />
+                      ) : (
+                        <div className="w-2 h-2 rounded-full mx-auto" style={{ background: '#F59E0B' }} />
+                      )}
+                    </div>
+                  )}
+                </button>
               )
             })}
           </div>
-          {/* Legend */}
-          <div className="text-[10px] flex items-center gap-3" style={{ color: '#6B6B80' }}>
-            <span><span style={{ color: '#22C55E' }}>✓</span> Open</span>
-            <span><span style={{ color: '#EAB308' }}>-</span> Closed</span>
-            <span><span style={{ color: '#EF4444' }}>X</span> Graded</span>
-          </div>
-        </div>
-        <div className="text-right">
-          <p className="text-xs" style={{ color: '#6B6B80' }}>Round</p>
-          <p className="text-lg font-bold" style={{ color: '#00FFA3' }}>{ROUND_LABELS[activeRoundKey] || `Round ${activeRound}`}</p>
-        </div>
-      </div>
 
-      {/* Entry Status Banner - if eliminated */}
-      {isEntryEliminated && (
-        <div className="rounded-xl p-4 flex items-center gap-3" style={{ background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)' }}>
-          <AlertCircle className="w-5 h-5" style={{ color: '#F87171' }} />
-          <div>
-            <p className="text-sm font-bold" style={{ color: '#F87171' }}>Eliminated</p>
-            <p className="text-xs" style={{ color: '#A0A0B0' }}>Your entry #{currentEntry?.entryNumber} has been eliminated from the pool.</p>
-          </div>
-        </div>
-      )}
+          {/* Game cards */}
+          {selectedDay && selectedDay.status !== 'pending' && (
+            <SurvivorGameCards
+              games={selectedDay.games ?? []}
+              selectedTeams={selectedTeamNames}
+              usedTeams={usedTeams}
+              onSelectTeam={handleSelectTeam}
+              disabled={picksDisabled}
+              picksRequired={selectedDay.picks_required}
+            />
+          )}
 
-      {/* Tournament Bracket - Always visible */}
-      {bracketData && (
-        <div className="relative">
-          {/* Sponsor watermark behind bracket */}
-          <div
-            className="absolute inset-0 flex items-center justify-center pointer-events-none select-none"
-            style={{ opacity: 0.12 }}
-          >
-            <span className="text-8xl font-black tracking-wider" style={{ color: '#00FFA3' }}>
-              SPONSOR
-            </span>
-          </div>
-          <SurvivorBracketView
-            bracketData={bracketData}
-            activeRound={activeRound}
-            userPicks={userPicks}
-            entryStatus={currentEntry?.status}
-            activeContestDay={activeContestDay}
-          />
-        </div>
-      )}
-
-      {/* No bracket data message */}
-      {!bracketData && (
-        <div className="rounded-xl p-8 text-center" style={{ background: '#12122A', border: '1px solid rgba(255,255,255,0.08)' }}>
-          <Trophy className="w-10 h-10 mx-auto mb-3" style={{ color: '#4A4A60' }} />
-          <p className="text-sm" style={{ color: '#6B6B80' }}>Tournament bracket will appear here once available.</p>
-        </div>
-      )}
-
-      {/* Sponsor button */}
-      <div className="flex justify-center">
-        <a
-          href="#"
-          className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold transition-all hover:opacity-80"
-          style={{
-            background: 'rgba(255,255,255,0.06)',
-            color: '#A0A0B0',
-            border: '1px solid rgba(255,255,255,0.1)',
-          }}
-        >
-          Branding / Link Here
-        </a>
-      </div>
-
-      {/* Entry Selector - if user has entries */}
-      {myEntries.length > 0 && (
-        <>
-          {/* Entry selector */}
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-semibold" style={{ color: '#6B6B80' }}>Entry:</span>
-            <select
-              value={activeEntryIndex}
-              onChange={(e) => {
-                setActiveEntryIndex(Number(e.target.value))
-                setSaveError(null)
-                setSaveSuccess(null)
-              }}
-              className="px-3 py-2 rounded-lg text-xs font-semibold"
-              style={{
-                background: 'rgba(0,255,163,0.08)',
-                color: '#00FFA3',
-                border: '1px solid rgba(0,255,163,0.2)',
-                outline: 'none',
-              }}
-            >
-              {myEntries.map((entry, idx) => (
-                <option key={entry.entryId} value={idx}>
-                  Entry #{entry.entryNumber} ({entry.status === 'alive' ? 'Alive' : 'Eliminated'})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* My Picks Summary */}
-          {userPicks.length > 0 && (
-            <div className="rounded-xl p-3" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-              <div className="flex items-center gap-2 mb-2">
-                <CheckCircle className="w-3.5 h-3.5" style={{ color: '#00FFA3' }} />
-                <span className="text-xs font-bold uppercase tracking-wider" style={{ color: '#6B6B80' }}>
-                  My Picks
-                </span>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {userPicks.map((pick) => (
-                  <div
-                    key={pick.round_number}
-                    className="flex items-center gap-2 px-2 py-1 rounded-md text-xs"
-                    style={{
-                      background: pick.result === 'won' ? 'rgba(0,255,163,0.08)' : pick.result === 'eliminated' ? 'rgba(239,68,68,0.08)' : 'rgba(250,204,21,0.08)',
-                      border: `1px solid ${pick.result === 'won' ? 'rgba(0,255,163,0.15)' : pick.result === 'eliminated' ? 'rgba(239,68,68,0.15)' : 'rgba(250,204,21,0.15)'}`,
-                    }}
-                  >
-                    <span className="font-semibold" style={{ color: '#4A4A60' }}>R{pick.round_number}:</span>
-                    <span className="font-medium" style={{ color: pick.result === 'won' ? '#00FFA3' : pick.result === 'eliminated' ? '#F87171' : '#FACC15' }}>
-                      {pick.team_name}
-                    </span>
-                    {pick.result === 'won' && <CheckCircle className="w-3 h-3" style={{ color: '#00FFA3' }} />}
-                    {pick.result === 'eliminated' && <XCircle className="w-3 h-3" style={{ color: '#F87171' }} />}
-                  </div>
-                ))}
-              </div>
+          {selectedDay?.status === 'pending' && (
+            <div className="text-center py-12 rounded-xl"
+              style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+              <p className="text-sm" style={{ color: '#6B6B80' }}>
+                This day has not been opened yet.
+              </p>
             </div>
           )}
 
-          {/* Game Cards for Active Round */}
-          {activeRoundMatchups && Object.keys(activeRoundMatchups).length > 0 && !isEntryEliminated && (
-            <div className="space-y-4">
-              {/* Contest Day Selection Tabs */}
-              <div className="flex flex-wrap gap-2">
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((day) => {
-                  const dayRound = day <= 2 ? 1 : day <= 4 ? 2 : day <= 6 ? 3 : day <= 8 ? 4 : day === 9 ? 5 : 6
-                  const dayRoundName = dayRound === 1 ? 'R64' : dayRound === 2 ? 'R32' : dayRound === 3 ? 'S16' : dayRound === 4 ? 'E8' : dayRound === 5 ? 'F4' : 'CH'
-                  const isActive = selectedContestDay === day || (selectedContestDay === null && day === activeContestDay)
-                  const dayPicks = currentEntry?.picks.filter((p) => p.contest_day === day && p.result === 'pending') ?? []
-                  const dayMax = day <= 2 || day >= 7 ? 2 : 1
-                  const isPast = day < activeContestDay
-
-                  return (
-                    <button
-                      key={day}
-                      onClick={() => setSelectedContestDay(day)}
-                      className="px-3 py-2 rounded-lg text-sm font-medium transition-all"
-                      style={{
-                        background: isActive ? 'rgba(0,255,163,0.15)' : 'rgba(255,255,255,0.05)',
-                        border: `1px solid ${isActive ? 'rgba(0,255,163,0.4)' : 'rgba(255,255,255,0.08)'}`,
-                        color: isActive ? '#00FFA3' : isPast ? '#6B6B80' : '#E6E6FA',
-                      }}
-                    >
-                      <div>Day {day}</div>
-                      <div className="text-[10px] opacity-70">{dayRoundName} • {dayPicks.length}/{dayMax}</div>
-                    </button>
-                  )
-                })}
-              </div>
-
-              {/* Enhanced Pick Header - Clear round/day and pick counter */}
-              <div className="rounded-xl p-4" style={{ background: 'linear-gradient(135deg, rgba(0,255,163,0.08) 0%, rgba(0,255,163,0.02) 100%)', border: '1px solid rgba(0,255,163,0.2)' }}>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="text-lg font-bold" style={{ color: '#00FFA3' }}>
-                      {ROUND_LABELS[activeRoundKey]} — Day {effectiveContestDay} Picks
-                    </h2>
-                    <p className="text-xs mt-1" style={{ color: '#A0A0B0' }}>
-                      {maxPicksPerDay === 2 ? '2 picks available today' : '1 pick available today'}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-2xl font-bold" style={{ color: '#00FFA3' }}>
-                      {picksUsedToday} / {maxPicksPerDay}
-                    </div>
-                    <div className="text-xs" style={{ color: '#6B6B80' }}>picks used</div>
-                  </div>
-                </div>
-                {/* Pick remaining indicator */}
-                {picksRemainingToday > 0 && (
-                  <div className="mt-3 text-xs" style={{ color: '#00FFA3' }}>
-                    {picksRemainingToday} {picksRemainingToday === 1 ? 'pick' : 'picks'} remaining today
-                  </div>
-                )}
-                {picksRemainingToday <= 0 && (
-                  <div className="mt-3 text-xs" style={{ color: '#F59E0B' }}>
-                    No picks remaining today — come back tomorrow!
-                  </div>
-                )}
-              </div>
-
-              {/* Round Status Banner */}
-              {isCurrentRoundLocked && (
-                <div className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl" style={{ background: currentRoundState === 'graded' ? 'rgba(239,68,68,0.1)' : 'rgba(250,204,21,0.1)', border: `1px solid ${currentRoundState === 'graded' ? 'rgba(239,68,68,0.3)' : 'rgba(250,204,21,0.3)'}` }}>
-                  <Lock className="w-4 h-4" style={{ color: currentRoundState === 'graded' ? '#EF4444' : '#EAB308' }} />
-                  <span className="text-sm font-medium" style={{ color: currentRoundState === 'graded' ? '#EF4444' : '#EAB308' }}>
-                    {currentRoundState === 'graded' ? 'Round Graded - Picks Locked' : 'Round Closed - Picks Locked'}
-                  </span>
-                </div>
-              )}
-
-              <RoundGameCards
-                roundKey={activeRoundKey}
-                roundNumber={activeRound}
-                matchups={activeRoundMatchups}
-                selectedTeam={currentPicks[0]?.teamName ?? existingPick?.team_name}
-                usedTeams={userPicks.map(p => p.team_name)}
-                isLocked={isCurrentRoundLocked}
-                isEliminated={isEntryEliminated}
-                onTeamSelect={isCurrentRoundLocked ? undefined : handleTeamSelect}
-              />
-
-              {/* Save Button */}
-              <div className="flex flex-col gap-2">
-                {/* Submit Picks button - only enabled when required picks are selected */}
-                {hasPendingPick && !isCurrentRoundLocked && (
-                  <Button
-                    onClick={handleSavePick}
-                    disabled={saving || picksUsedToday < maxPicksPerDay}
-                    className="font-bold"
-                    style={{ background: '#00FFA3', color: '#000' }}
-                  >
-                    {saving ? 'Submitting...' : 'Submit Picks'}
-                  </Button>
-                )}
-                {hasSubmittedPick && !hasPendingPick && (
-                  <p className="text-xs text-center" style={{ color: '#6B6B80' }}>
-                    Pick submitted for this round
-                  </p>
-                )}
-                {isCurrentRoundLocked && existingPick && (
-                  <p className="text-xs text-center" style={{ color: currentRoundState === 'graded' ? '#EF4444' : '#EAB308' }}>
-                    {currentRoundState === 'graded' ? 'Round has been graded' : 'Round is locked - picks cannot be changed'}
-                  </p>
-                )}
-                {!hasSubmittedPick && !hasPendingPick && (
-                  <p className="text-xs text-center" style={{ color: '#6B6B80' }}>
-                    Select a team above to make your pick
-                  </p>
-                )}
-                {saveError && (
-                  <p className="text-xs text-center" style={{ color: '#F87171' }}>{saveError}</p>
-                )}
-                {saveSuccess && (
-                  <p className="text-xs text-center" style={{ color: '#00FFA3' }}>{saveSuccess}</p>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* No active round matchups */}
-          {(!activeRoundMatchups || Object.keys(activeRoundMatchups).length === 0) && !isEntryEliminated && (
-            <div className="rounded-xl p-6 text-center" style={{ background: '#12122A', border: '1px solid rgba(255,255,255,0.08)' }}>
-              <p className="text-sm" style={{ color: '#6B6B80' }}>No matchups available for the current round.</p>
-            </div>
-          )}
-        </>
-      )}
-
-      {/* No entries yet */}
-      {myEntries.length === 0 && (
-        <div className="rounded-xl p-8 text-center" style={{ background: '#12122A', border: '1px solid rgba(255,255,255,0.08)' }}>
-          <Trophy className="w-10 h-10 mx-auto mb-3" style={{ color: '#00FFA3' }} />
-          <h2 className="text-lg font-bold mb-2" style={{ color: '#E6E6FA' }}>Join the Official Survivor</h2>
-
-          {/* Admin: Create Test Entry button */}
-          {isAdmin && (
-            <div className="mb-4">
-              <p className="text-xs mb-3" style={{ color: '#A0A0B0' }}>Admin: Create a test entry to preview the survivor experience</p>
-              <div className="flex gap-2 justify-center">
-                {[1, 2, 3].map((num) => (
-                  <Button
-                    key={num}
-                    onClick={() => createTestEntry(num)}
-                    disabled={creatingEntry}
-                    style={{ background: 'rgba(0,255,163,0.12)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.25)' }}
-                    className="text-xs"
-                  >
-                    {creatingEntry ? 'Creating...' : `Entry #${num}`}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {!isAdmin && (
-            <div className="space-y-4">
-              <p className="text-sm" style={{ color: '#A0A0B0' }}>Join the Official Survivor contest - free to enter!</p>
+          {/* Submit button */}
+          {selectedDay?.status === 'open' && !isEntryEliminated && (
+            <div className="flex justify-center pt-2">
               <Button
-                onClick={createEntry}
-                disabled={creatingEntry}
-                style={{ background: 'rgba(0,255,163,0.12)', color: '#00FFA3', border: '1px solid rgba(0,255,163,0.25)' }}
+                onClick={handleSubmitPicks}
+                disabled={!canSubmit}
+                className="px-8 py-3 rounded-xl font-bold text-sm min-w-[200px]"
+                style={{
+                  background: canSubmit
+                    ? 'linear-gradient(135deg, #00FFA3, #00CC82)'
+                    : 'rgba(255,255,255,0.06)',
+                  color: canSubmit ? '#000' : '#6B6B80',
+                  border: 'none',
+                  boxShadow: canSubmit ? '0 0 20px rgba(0,255,163,0.3)' : 'none',
+                  cursor: canSubmit ? 'pointer' : 'not-allowed',
+                  opacity: canSubmit ? 1 : 0.6,
+                }}
               >
-                {creatingEntry ? 'Creating...' : 'Create My Entry'}
+                {submitting ? 'Submitting...' : dayPicks.length > 0 ? 'Update Picks' : 'Submit Picks'}
               </Button>
             </div>
           )}
+        </div>
+      )}
+
+      {data.days.length === 0 && data.contest.bracket_confirmed && (
+        <div className="text-center py-8 rounded-xl"
+          style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+          <p className="text-sm" style={{ color: '#6B6B80' }}>
+            The bracket is set! Contest days will be posted soon.
+          </p>
         </div>
       )}
     </div>
