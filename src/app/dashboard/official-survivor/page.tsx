@@ -73,9 +73,9 @@ export default function OfficialSurvivorPage() {
   const [error, setError] = useState<string | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
 
-  // State for picks
+  // State for picks - array to support multiple picks per day
   const [activeEntryIndex, setActiveEntryIndex] = useState(0)
-  const [pendingPicks, setPendingPicks] = useState<Record<string, PickSelection | null>>({})
+  const [pendingPicks, setPendingPicks] = useState<Record<string, PickSelection[]>>({})
   const [selectedContestDay, setSelectedContestDay] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -239,13 +239,11 @@ export default function OfficialSurvivorPage() {
   // Current entry
   const currentEntry = myEntries[activeEntryIndex] ?? myEntries[0]
   const currentEntryId = currentEntry?.entryId
-  const currentPick = currentEntryId ? pendingPicks[currentEntryId] ?? null : null
   const isEntryEliminated = currentEntry?.status === 'eliminated'
 
   // Determine if current entry already has a pick for the active round
   const existingPick = currentEntry?.picks.find((p) => p.round_number === activeRound)
   const hasSubmittedPick = existingPick != null
-  const hasPendingPick = currentPick != null
 
   // Calculate picks for current contest day (use selected day if set, otherwise active day)
   const effectiveContestDay = selectedContestDay ?? activeContestDay
@@ -255,6 +253,11 @@ export default function OfficialSurvivorPage() {
   const picksUsedToday = currentDayPicks.length
   const picksRemainingToday = maxPicksPerDay - picksUsedToday
 
+  // Current pending picks for this entry and day
+  const currentPicks = currentEntryId ? (pendingPicks[currentEntryId] ?? []) : []
+  const hasPendingPick = currentPicks.length > 0
+  const pendingPicksUsedToday = currentPicks.length
+
   // Count alive entries
   const aliveEntrants = leaderboard.filter((r) => r.status === 'alive').length
   const myAliveEntries = myEntries.filter((e) => e.status === 'alive').length
@@ -262,46 +265,52 @@ export default function OfficialSurvivorPage() {
   // Handle team selection - supports multiple picks per day
   const handleTeamSelect = (selection: PickSelection) => {
     if (!currentEntryId || isEntryEliminated || isCurrentRoundLocked) return
-    // Allow pick if: no pending pick yet OR picks remaining today
-    if (!currentPick && picksRemainingToday <= 0) return
+    // Check if this team is already selected
+    if (currentPicks.some(p => p.teamName === selection.teamName)) return
+    // Check if picks remaining today (including pending)
+    const totalPicksUsed = picksUsedToday + pendingPicksUsedToday
+    if (totalPicksUsed >= maxPicksPerDay) return
     setPendingPicks(prev => ({
       ...prev,
-      [currentEntryId]: selection
+      [currentEntryId]: [...(prev[currentEntryId] ?? []), selection]
     }))
     setSaveError(null)
     setSaveSuccess(null)
   }
 
-  // Save pick
+  // Save all pending picks
   const handleSavePick = async () => {
-    if (!currentEntryId || !currentPick) return
+    if (!currentEntryId || currentPicks.length === 0) return
 
     setSaving(true)
     setSaveError(null)
     setSaveSuccess(null)
 
     try {
-      const res = await fetch('/api/survivor/official', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          entry_id: currentEntryId,
-          round_number: activeRound,
-          team_name: currentPick.teamName,
-          team_seed: currentPick.teamSeed,
-          opponent_name: currentPick.opponentName,
-          opponent_seed: currentPick.opponentSeed,
-        }),
-      })
+      // Save each pick one by one
+      for (const pick of currentPicks) {
+        const res = await fetch('/api/survivor/official', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            entry_id: currentEntryId,
+            round_number: activeRound,
+            team_name: pick.teamName,
+            team_seed: pick.teamSeed,
+            opponent_name: pick.opponentName,
+            opponent_seed: pick.opponentSeed,
+          }),
+        })
 
-      if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.error || 'Failed to save pick')
+        if (!res.ok) {
+          const err = await res.json()
+          throw new Error(err.error || 'Failed to save pick')
+        }
       }
 
-      // Clear pending pick and refetch
-      setPendingPicks(prev => ({ ...prev, [currentEntryId]: null }))
-      setSaveSuccess('Pick locked in successfully!')
+      // Clear pending picks and refetch
+      setPendingPicks(prev => ({ ...prev, [currentEntryId]: [] }))
+      setSaveSuccess(`Successfully submitted ${currentPicks.length} pick(s)!`)
       fetchData()
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Unknown error')
@@ -606,7 +615,7 @@ export default function OfficialSurvivorPage() {
                 roundKey={activeRoundKey}
                 roundNumber={activeRound}
                 matchups={activeRoundMatchups}
-                selectedTeam={currentPick?.teamName ?? existingPick?.team_name}
+                selectedTeam={currentPicks[0]?.teamName ?? existingPick?.team_name}
                 usedTeams={userPicks.map(p => p.team_name)}
                 isLocked={isCurrentRoundLocked}
                 isEliminated={isEntryEliminated}
@@ -615,14 +624,15 @@ export default function OfficialSurvivorPage() {
 
               {/* Save Button */}
               <div className="flex flex-col gap-2">
+                {/* Submit Picks button - only enabled when required picks are selected */}
                 {hasPendingPick && !isCurrentRoundLocked && (
                   <Button
                     onClick={handleSavePick}
-                    disabled={saving}
+                    disabled={saving || picksUsedToday < maxPicksPerDay}
                     className="font-bold"
                     style={{ background: '#00FFA3', color: '#000' }}
                   >
-                    {saving ? 'Locking In...' : 'Lock In Pick'}
+                    {saving ? 'Submitting...' : 'Submit Picks'}
                   </Button>
                 )}
                 {hasSubmittedPick && !hasPendingPick && (

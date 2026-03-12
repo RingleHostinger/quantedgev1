@@ -195,115 +195,182 @@ export function SurvivorBracketView({ bracketData, activeRound, userPicks, entry
       </button>
 
       {expanded && (
-        <div className="border-t p-2" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
-          {/* Compact March Madness Layout: Left | Center | Right */}
-          <div className="flex items-stretch justify-between w-full gap-1">
-            {/* LEFT SIDE: East + West regions - stacked horizontally */}
-            <div className="flex gap-1 flex-1 justify-center">
-              {/* East */}
-              <div className="flex flex-col">
-                <div className="text-center text-[9px] font-bold uppercase mb-1" style={{ color: '#00FFA3' }}>East</div>
-                <div className="flex gap-1">
-                  {['round64', 'round32', 'sweet16', 'elite8'].map((roundKey) => {
-                    const roundNum = ROUND_KEYS.indexOf(roundKey) + 1
-                    const isActive = activeRound === roundNum
-                    const matchups = getRegionMatchups(results, roundKey, 'East')
-                    return (
-                      <div key={`east-${roundKey}`} className="flex flex-col justify-center" style={{ opacity: isActive ? 1 : 0.5 }}>
-                        <div className="text-[7px] font-bold uppercase text-center mb-0.5" style={{ color: isActive ? '#00FFA3' : '#6B6B80' }}>{ROUND_LABELS[roundKey]}</div>
-                        <div className="space-y-0.5">
-                          {matchups.map(([key, matchup]) => (
-                            <CompactMatchupCard key={key} matchup={matchup} roundKey={roundKey} userPicks={userPicks} />
-                          ))}
-                        </div>
-                      </div>
-                    )
-                  })}
+        <div className="border-t p-2 overflow-x-auto" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+          {/* True March Madness Bracket Layout */}
+          {/* Each region's rounds fold inward - R64 on outside, moving inward */}
+          <div className="flex items-stretch justify-center gap-1 min-w-max">
+            {/* LEFT CONFERENCE: East */}
+            <div className="flex flex-col">
+              <div className="text-center text-[9px] font-bold uppercase mb-1" style={{ color: '#00FFA3' }}>East</div>
+              <div className="flex items-stretch gap-0.5">
+                {/* Round of 64 - 8 games */}
+                <div className="flex flex-col justify-around py-1">
+                  <div className="text-[6px] text-center text-[#6B6B80] mb-0.5">R64</div>
+                  <div className="space-y-0.5">
+                    {getRegionMatchups(results, 'round64', 'East').map(([key, matchup]) => (
+                      <CompactMatchupCard key={key} matchup={matchup} roundKey="round64" userPicks={userPicks} />
+                    ))}
+                  </div>
+                </div>
+                {/* Round of 32 - 4 games */}
+                <div className="flex flex-col justify-around py-4">
+                  <div className="text-[6px] text-center text-[#6B6B80] mb-0.5">R32</div>
+                  <div className="space-y-1">
+                    {getRegionMatchups(results, 'round32', 'East').map(([key, matchup]) => (
+                      <CompactMatchupCard key={key} matchup={matchup} roundKey="round32" userPicks={userPicks} />
+                    ))}
+                  </div>
+                </div>
+                {/* Sweet 16 - 2 games */}
+                <div className="flex flex-col justify-around py-8">
+                  <div className="text-[6px] text-center text-[#6B6B80] mb-1">S16</div>
+                  <div className="space-y-2">
+                    {getRegionMatchups(results, 'sweet16', 'East').map(([key, matchup]) => (
+                      <CompactMatchupCard key={key} matchup={matchup} roundKey="sweet16" userPicks={userPicks} />
+                    ))}
+                  </div>
+                </div>
+                {/* Elite 8 - 1 game */}
+                <div className="flex flex-col justify-center py-12">
+                  <div className="text-[6px] text-center text-[#6B6B80] mb-2">E8</div>
+                  <div className="space-y-2">
+                    {getRegionMatchups(results, 'elite8', 'East').map(([key, matchup]) => (
+                      <CompactMatchupCard key={key} matchup={matchup} roundKey="elite8" userPicks={userPicks} />
+                    ))}
+                  </div>
                 </div>
               </div>
+            </div>
 
-              {/* West */}
-              <div className="flex flex-col">
-                <div className="text-center text-[9px] font-bold uppercase mb-1" style={{ color: '#00FFA3' }}>West</div>
-                <div className="flex gap-1">
-                  {['round64', 'round32', 'sweet16', 'elite8'].map((roundKey) => {
-                    const roundNum = ROUND_KEYS.indexOf(roundKey) + 1
-                    const isActive = activeRound === roundNum
-                    const matchups = getRegionMatchups(results, roundKey, 'West')
-                    return (
-                      <div key={`west-${roundKey}`} className="flex flex-col justify-center" style={{ opacity: isActive ? 1 : 0.5 }}>
-                        <div className="text-[7px] font-bold uppercase text-center mb-0.5" style={{ color: isActive ? '#00FFA3' : '#6B6B80' }}>{ROUND_LABELS[roundKey]}</div>
-                        <div className="space-y-0.5">
-                          {matchups.map(([key, matchup]) => (
-                            <CompactMatchupCard key={key} matchup={matchup} roundKey={roundKey} userPicks={userPicks} />
-                          ))}
-                        </div>
-                      </div>
-                    )
-                  })}
+            {/* LEFT CONFERENCE: West */}
+            <div className="flex flex-col">
+              <div className="text-center text-[9px] font-bold uppercase mb-1" style={{ color: '#00FFA3' }}>West</div>
+              <div className="flex items-stretch gap-0.5">
+                <div className="flex flex-col justify-around py-1">
+                  <div className="text-[6px] text-center text-[#6B6B80] mb-0.5">R64</div>
+                  <div className="space-y-0.5">
+                    {getRegionMatchups(results, 'round64', 'West').map(([key, matchup]) => (
+                      <CompactMatchupCard key={key} matchup={matchup} roundKey="round64" userPicks={userPicks} />
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-col justify-around py-4">
+                  <div className="text-[6px] text-center text-[#6B6B80] mb-0.5">R32</div>
+                  <div className="space-y-1">
+                    {getRegionMatchups(results, 'round32', 'West').map(([key, matchup]) => (
+                      <CompactMatchupCard key={key} matchup={matchup} roundKey="round32" userPicks={userPicks} />
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-col justify-around py-8">
+                  <div className="text-[6px] text-center text-[#6B6B80] mb-1">S16</div>
+                  <div className="space-y-2">
+                    {getRegionMatchups(results, 'sweet16', 'West').map(([key, matchup]) => (
+                      <CompactMatchupCard key={key} matchup={matchup} roundKey="sweet16" userPicks={userPicks} />
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-col justify-center py-12">
+                  <div className="text-[6px] text-center text-[#6B6B80] mb-2">E8</div>
+                  <div className="space-y-2">
+                    {getRegionMatchups(results, 'elite8', 'West').map(([key, matchup]) => (
+                      <CompactMatchupCard key={key} matchup={matchup} roundKey="elite8" userPicks={userPicks} />
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
 
             {/* CENTER: Final Four + Championship */}
-            <div className="flex flex-col items-center justify-center gap-1 px-2">
+            <div className="flex flex-col items-center justify-center px-2">
               <div className="text-[9px] font-bold uppercase mb-1" style={{ color: '#F59E0B' }}>Final Four</div>
-              <div className="space-y-0.5">
+              <div className="space-y-2 py-4">
                 {(results['finalFour'] ? Object.entries(results['finalFour']) : []).sort((a, b) => parseMatchupIndex(a[0]) - parseMatchupIndex(b[0])).map(([key, matchup]) => (
                   <CompactMatchupCard key={key} matchup={matchup} roundKey="finalFour" userPicks={userPicks} />
                 ))}
               </div>
               <div className="text-[9px] font-bold uppercase my-1" style={{ color: '#EF4444' }}>Championship</div>
-              <div className="space-y-0.5">
+              <div className="space-y-2 py-2">
                 {(results['championship'] ? Object.entries(results['championship']) : []).sort((a, b) => parseMatchupIndex(a[0]) - parseMatchupIndex(b[0])).map(([key, matchup]) => (
                   <CompactMatchupCard key={key} matchup={matchup} roundKey="championship" userPicks={userPicks} />
                 ))}
               </div>
             </div>
 
-            {/* RIGHT SIDE: South + Midwest */}
-            <div className="flex gap-1 flex-1 justify-center">
-              {/* South */}
-              <div className="flex flex-col">
-                <div className="text-center text-[9px] font-bold uppercase mb-1" style={{ color: '#F59E0B' }}>South</div>
-                <div className="flex gap-1">
-                  {['round64', 'round32', 'sweet16', 'elite8'].map((roundKey) => {
-                    const roundNum = ROUND_KEYS.indexOf(roundKey) + 1
-                    const isActive = activeRound === roundNum
-                    const matchups = getRegionMatchups(results, roundKey, 'South')
-                    return (
-                      <div key={`south-${roundKey}`} className="flex flex-col justify-center" style={{ opacity: isActive ? 1 : 0.5 }}>
-                        <div className="text-[7px] font-bold uppercase text-center mb-0.5" style={{ color: isActive ? '#F59E0B' : '#6B6B80' }}>{ROUND_LABELS[roundKey]}</div>
-                        <div className="space-y-0.5">
-                          {matchups.map(([key, matchup]) => (
-                            <CompactMatchupCard key={key} matchup={matchup} roundKey={roundKey} userPicks={userPicks} />
-                          ))}
-                        </div>
-                      </div>
-                    )
-                  })}
+            {/* RIGHT CONFERENCE: South */}
+            <div className="flex flex-col">
+              <div className="text-center text-[9px] font-bold uppercase mb-1" style={{ color: '#F59E0B' }}>South</div>
+              <div className="flex items-stretch gap-0.5">
+                <div className="flex flex-col justify-around py-1">
+                  <div className="text-[6px] text-center text-[#6B6B80] mb-0.5">R64</div>
+                  <div className="space-y-0.5">
+                    {getRegionMatchups(results, 'round64', 'South').map(([key, matchup]) => (
+                      <CompactMatchupCard key={key} matchup={matchup} roundKey="round64" userPicks={userPicks} />
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-col justify-around py-4">
+                  <div className="text-[6px] text-center text-[#6B6B80] mb-0.5">R32</div>
+                  <div className="space-y-1">
+                    {getRegionMatchups(results, 'round32', 'South').map(([key, matchup]) => (
+                      <CompactMatchupCard key={key} matchup={matchup} roundKey="round32" userPicks={userPicks} />
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-col justify-around py-8">
+                  <div className="text-[6px] text-center text-[#6B6B80] mb-1">S16</div>
+                  <div className="space-y-2">
+                    {getRegionMatchups(results, 'sweet16', 'South').map(([key, matchup]) => (
+                      <CompactMatchupCard key={key} matchup={matchup} roundKey="sweet16" userPicks={userPicks} />
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-col justify-center py-12">
+                  <div className="text-[6px] text-center text-[#6B6B80] mb-2">E8</div>
+                  <div className="space-y-2">
+                    {getRegionMatchups(results, 'elite8', 'South').map(([key, matchup]) => (
+                      <CompactMatchupCard key={key} matchup={matchup} roundKey="elite8" userPicks={userPicks} />
+                    ))}
+                  </div>
                 </div>
               </div>
+            </div>
 
-              {/* Midwest */}
-              <div className="flex flex-col">
-                <div className="text-center text-[9px] font-bold uppercase mb-1" style={{ color: '#F59E0B' }}>Midwest</div>
-                <div className="flex gap-1">
-                  {['round64', 'round32', 'sweet16', 'elite8'].map((roundKey) => {
-                    const roundNum = ROUND_KEYS.indexOf(roundKey) + 1
-                    const isActive = activeRound === roundNum
-                    const matchups = getRegionMatchups(results, roundKey, 'Midwest')
-                    return (
-                      <div key={`midwest-${roundKey}`} className="flex flex-col justify-center" style={{ opacity: isActive ? 1 : 0.5 }}>
-                        <div className="text-[7px] font-bold uppercase text-center mb-0.5" style={{ color: isActive ? '#F59E0B' : '#6B6B80' }}>{ROUND_LABELS[roundKey]}</div>
-                        <div className="space-y-0.5">
-                          {matchups.map(([key, matchup]) => (
-                            <CompactMatchupCard key={key} matchup={matchup} roundKey={roundKey} userPicks={userPicks} />
-                          ))}
-                        </div>
-                      </div>
-                    )
-                  })}
+            {/* RIGHT CONFERENCE: Midwest */}
+            <div className="flex flex-col">
+              <div className="text-center text-[9px] font-bold uppercase mb-1" style={{ color: '#F59E0B' }}>Midwest</div>
+              <div className="flex items-stretch gap-0.5">
+                <div className="flex flex-col justify-around py-1">
+                  <div className="text-[6px] text-center text-[#6B6B80] mb-0.5">R64</div>
+                  <div className="space-y-0.5">
+                    {getRegionMatchups(results, 'round64', 'Midwest').map(([key, matchup]) => (
+                      <CompactMatchupCard key={key} matchup={matchup} roundKey="round64" userPicks={userPicks} />
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-col justify-around py-4">
+                  <div className="text-[6px] text-center text-[#6B6B80] mb-0.5">R32</div>
+                  <div className="space-y-1">
+                    {getRegionMatchups(results, 'round32', 'Midwest').map(([key, matchup]) => (
+                      <CompactMatchupCard key={key} matchup={matchup} roundKey="round32" userPicks={userPicks} />
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-col justify-around py-8">
+                  <div className="text-[6px] text-center text-[#6B6B80] mb-1">S16</div>
+                  <div className="space-y-2">
+                    {getRegionMatchups(results, 'sweet16', 'Midwest').map(([key, matchup]) => (
+                      <CompactMatchupCard key={key} matchup={matchup} roundKey="sweet16" userPicks={userPicks} />
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-col justify-center py-12">
+                  <div className="text-[6px] text-center text-[#6B6B80] mb-2">E8</div>
+                  <div className="space-y-2">
+                    {getRegionMatchups(results, 'elite8', 'Midwest').map(([key, matchup]) => (
+                      <CompactMatchupCard key={key} matchup={matchup} roundKey="elite8" userPicks={userPicks} />
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>

@@ -30,6 +30,8 @@ interface AdminBracketEditorProps {
   onLoadTeams: () => Promise<Record<string, BracketTeam[]> | null>
   onGradeGame: (roundKey: string, matchupKey: string, winner: string) => Promise<void>
   onLockGame?: (roundKey: string, matchupKey: string, locked: boolean) => Promise<void>
+  onPostGames?: (contestDay: number, matchupKeys: string[]) => Promise<void>
+  activeContestDay?: number
   onSaveTestPreview?: (data: OfficialBracketData) => Promise<void>
 }
 
@@ -231,6 +233,8 @@ export default function AdminBracketEditor({
   onLoadTeams,
   onGradeGame,
   onLockGame,
+  onPostGames,
+  activeContestDay = 1,
   onSaveTestPreview
 }: AdminBracketEditorProps) {
   // Local state for editing
@@ -243,6 +247,7 @@ export default function AdminBracketEditor({
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null)
   const [pendingWinners, setPendingWinners] = useState<Record<string, Record<string, string>>>({})
+  const [selectedGamesForPost, setSelectedGamesForPost] = useState<Record<string, string[]>>({})  // roundKey -> matchupKeys[]
   const [showConfirmDialog, setShowConfirmDialog] = useState(false)
   const [showTeamValidation, setShowTeamValidation] = useState<Record<string, Record<string, { valid: boolean; error?: string }>>>({})
   const [isDirty, setIsDirty] = useState(false)
@@ -526,6 +531,40 @@ export default function AdminBracketEditor({
       console.error('Failed to lock game:', error)
       setMessage({ type: 'error', text: 'Failed to lock game' })
     }
+  }
+
+  // Handle posting games for contest day
+  const handlePostGames = async (contestDay: number) => {
+    if (!onPostGames) return
+
+    const matchupKeys = selectedGamesForPost[contestDay] || []
+    if (matchupKeys.length === 0) {
+      setMessage({ type: 'error', text: 'No games selected to post' })
+      return
+    }
+
+    try {
+      await onPostGames(contestDay, matchupKeys)
+      setSelectedGamesForPost(prev => ({ ...prev, [contestDay]: [] }))
+      setMessage({ type: 'success', text: `${matchupKeys.length} games posted for Day ${contestDay}` })
+    } catch (error) {
+      console.error('Failed to post games:', error)
+      setMessage({ type: 'error', text: 'Failed to post games' })
+    }
+  }
+
+  // Toggle game selection for posting
+  const toggleGameSelection = (roundKey: string, matchupKey: string, contestDay: number) => {
+    setSelectedGamesForPost(prev => {
+      const current = prev[contestDay] || []
+      const isSelected = current.includes(matchupKey)
+      return {
+        ...prev,
+        [contestDay]: isSelected
+          ? current.filter(k => k !== matchupKey)
+          : [...current, matchupKey]
+      }
+    })
   }
 
   // Select pending winner
@@ -970,6 +1009,56 @@ export default function AdminBracketEditor({
         })}
       </div>
 
+      {/* Post Games Section - Select games to post for contest days */}
+      {onPostGames && (
+        <div className="mt-4 p-4 rounded-xl" style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.2)' }}>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-bold" style={{ color: '#A855F7' }}>Post Games for Contest Day</h3>
+            <span className="text-xs" style={{ color: '#6B6B80' }}>Select games below, then click Post</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((day) => {
+              const dayRound = day <= 2 ? 1 : day <= 4 ? 2 : day <= 6 ? 3 : day <= 8 ? 4 : day === 9 ? 5 : 6
+              const dayLabel = dayRound === 1 ? 'R64' : dayRound === 2 ? 'R32' : dayRound === 3 ? 'S16' : dayRound === 4 ? 'E8' : dayRound === 5 ? 'F4' : 'CH'
+              const selectedCount = (selectedGamesForPost[day] || []).length
+
+              return (
+                <div key={day} className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      // Toggle round expansion for this day
+                      const roundKey = ['round64', 'round32', 'sweet16', 'elite8', 'finalFour', 'championship'][dayRound - 1]
+                      setExpandedRound(roundKey)
+                    }}
+                    className="px-3 py-2 rounded-lg text-xs font-medium"
+                    style={{
+                      background: selectedCount > 0 ? 'rgba(139,92,246,0.2)' : 'rgba(255,255,255,0.05)',
+                      border: `1px solid ${selectedCount > 0 ? 'rgba(139,92,246,0.4)' : 'rgba(255,255,255,0.1)'}`,
+                      color: '#E6E6FA'
+                    }}
+                  >
+                    Day {day} ({dayLabel})
+                    {selectedCount > 0 && <span className="ml-1 text-purple-400">({selectedCount})</span>}
+                  </button>
+                  {selectedCount > 0 && (
+                    <button
+                      onClick={() => handlePostGames(day)}
+                      className="px-3 py-2 rounded-lg text-xs font-bold"
+                      style={{ background: '#8B5CF6', color: '#fff' }}
+                    >
+                      Post
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          <p className="text-xs mt-2" style={{ color: '#6B6B80' }}>
+            Click on a day to expand its games, then check the games you want to post. Click Post to make them available to users.
+          </p>
+        </div>
+      )}
+
       {/* Horizontally scrollable bracket */}
       <div className="overflow-x-auto pb-4">
         <div className="min-w-max">
@@ -1057,6 +1146,20 @@ export default function AdminBracketEditor({
                             border: hasPending ? '1px solid rgba(245,158,11,0.3)' : '1px solid rgba(255,255,255,0.02)'
                           }}
                         >
+                          {/* Post selection checkbox */}
+                          {onPostGames && !winner && (
+                            <div className="flex items-center gap-2 mb-2 pb-2 border-b" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+                              <input
+                                type="checkbox"
+                                checked={selectedGamesForPost[activeContestDay]?.includes(matchupKey) || false}
+                                onChange={() => toggleGameSelection(roundKey, matchupKey, activeContestDay)}
+                                className="w-4 h-4 rounded"
+                                style={{ accentColor: '#8B5CF6' }}
+                              />
+                              <span className="text-[10px]" style={{ color: '#6B6B80' }}>Select to post</span>
+                            </div>
+                          )}
+
                           {/* Team 1 */}
                           <button
                             onClick={() => team1Name !== 'TBD' && selectPendingWinner(roundKey, matchupKey, team1Name)}

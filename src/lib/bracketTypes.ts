@@ -18,6 +18,7 @@ export interface BracketMatchup {
 export interface OfficialBracketData {
   regions?: Record<string, BracketTeam[]>
   results?: Record<string, Record<string, BracketMatchup>>
+  posted_games?: Record<number, string[]>  // contest_day -> array of matchup keys
 }
 
 export interface RoundCompletionStatus {

@@ -474,6 +474,24 @@ export default function AdminPage() {
     } catch { setBracketMsg('Error locking game') }
   }
 
+  const postGames = async (contestDay: number, matchupKeys: string[]) => {
+    setBracketMsg('')
+    try {
+      const res = await fetch('/api/admin/survivor-bracket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'post_games', contestDay, matchupKeys }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        if (data.bracketData) setBracketData(data.bracketData)
+        setBracketMsg(data.message || `Posted ${matchupKeys.length} games for Day ${contestDay}`)
+      } else {
+        setBracketMsg(data.error || 'Failed to post games')
+      }
+    } catch { setBracketMsg('Error posting games') }
+  }
+
   // Official Survivor test entry
   const loadAllEntries = async () => {
     setEntriesLoading(true)
@@ -2441,6 +2459,8 @@ export default function AdminPage() {
                 onLoadTeams={loadBracketTeams}
                 onGradeGame={gradeGame}
                 onLockGame={lockGame}
+                onPostGames={postGames}
+                activeContestDay={1}
               />
               {bracketMsg && (
                 <div className="text-xs px-3 py-2 rounded-lg mt-2" style={{ background: 'rgba(255,255,255,0.05)', color: '#A0A0B0' }}>

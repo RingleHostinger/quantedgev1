@@ -399,6 +399,48 @@ export async function POST(req: NextRequest) {
     })
   }
 
+  // Action: post_games - Save which games are posted for a contest day
+  if (action === 'post_games') {
+    const { contestDay, matchupKeys } = body
+
+    if (!contestDay || !Array.isArray(matchupKeys)) {
+      return NextResponse.json({ error: 'contestDay and matchupKeys are required' }, { status: 400 })
+    }
+
+    // Get current bracket data
+    const { data: pool } = await supabaseAdmin
+      .from('survivor_pools')
+      .select('bracket_data')
+      .eq('is_official', true)
+      .single()
+
+    if (!pool) {
+      return NextResponse.json({ error: 'Official pool not found' }, { status: 404 })
+    }
+
+    const currentBracketData = (pool.bracket_data as Record<string, unknown>) || {}
+    const postedGames = (currentBracketData.posted_games as Record<number, string[]>) || {}
+
+    // Update posted games for this contest day
+    postedGames[contestDay] = matchupKeys
+
+    // Save back
+    const { error: postError } = await supabaseAdmin
+      .from('survivor_pools')
+      .update({ bracket_data: { ...currentBracketData, posted_games: postedGames } })
+      .eq('is_official', true)
+
+    if (postError) {
+      return NextResponse.json({ error: postError.message }, { status: 500 })
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: `Posted ${matchupKeys.length} games for Day ${contestDay}`,
+      bracketData: { ...currentBracketData, posted_games: postedGames },
+    })
+  }
+
   // Just save/update bracket data
   const { error: updateError } = await supabaseAdmin
     .from('survivor_pools')
