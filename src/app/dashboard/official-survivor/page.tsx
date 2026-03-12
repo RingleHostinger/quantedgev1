@@ -76,6 +76,7 @@ export default function OfficialSurvivorPage() {
   // State for picks
   const [activeEntryIndex, setActiveEntryIndex] = useState(0)
   const [pendingPicks, setPendingPicks] = useState<Record<string, PickSelection | null>>({})
+  const [selectedContestDay, setSelectedContestDay] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
@@ -246,10 +247,11 @@ export default function OfficialSurvivorPage() {
   const hasSubmittedPick = existingPick != null
   const hasPendingPick = currentPick != null
 
-  // Calculate picks for current contest day
+  // Calculate picks for current contest day (use selected day if set, otherwise active day)
+  const effectiveContestDay = selectedContestDay ?? activeContestDay
   const doublePickDays = [1, 2, 7, 8]
-  const maxPicksPerDay = doublePickDays.includes(activeContestDay) ? 2 : 1
-  const currentDayPicks = currentEntry?.picks.filter((p) => p.contest_day === activeContestDay && p.result === 'pending') ?? []
+  const maxPicksPerDay = doublePickDays.includes(effectiveContestDay) ? 2 : 1
+  const currentDayPicks = currentEntry?.picks.filter((p) => p.contest_day === effectiveContestDay && p.result === 'pending') ?? []
   const picksUsedToday = currentDayPicks.length
   const picksRemainingToday = maxPicksPerDay - picksUsedToday
 
@@ -531,12 +533,40 @@ export default function OfficialSurvivorPage() {
           {/* Game Cards for Active Round */}
           {activeRoundMatchups && Object.keys(activeRoundMatchups).length > 0 && !isEntryEliminated && (
             <div className="space-y-4">
+              {/* Contest Day Selection Tabs */}
+              <div className="flex flex-wrap gap-2">
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((day) => {
+                  const dayRound = day <= 2 ? 1 : day <= 4 ? 2 : day <= 6 ? 3 : day <= 8 ? 4 : day === 9 ? 5 : 6
+                  const dayRoundName = dayRound === 1 ? 'R64' : dayRound === 2 ? 'R32' : dayRound === 3 ? 'S16' : dayRound === 4 ? 'E8' : dayRound === 5 ? 'F4' : 'CH'
+                  const isActive = selectedContestDay === day || (selectedContestDay === null && day === activeContestDay)
+                  const dayPicks = currentEntry?.picks.filter((p) => p.contest_day === day && p.result === 'pending') ?? []
+                  const dayMax = day <= 2 || day >= 7 ? 2 : 1
+                  const isPast = day < activeContestDay
+
+                  return (
+                    <button
+                      key={day}
+                      onClick={() => setSelectedContestDay(day)}
+                      className="px-3 py-2 rounded-lg text-sm font-medium transition-all"
+                      style={{
+                        background: isActive ? 'rgba(0,255,163,0.15)' : 'rgba(255,255,255,0.05)',
+                        border: `1px solid ${isActive ? 'rgba(0,255,163,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                        color: isActive ? '#00FFA3' : isPast ? '#6B6B80' : '#E6E6FA',
+                      }}
+                    >
+                      <div>Day {day}</div>
+                      <div className="text-[10px] opacity-70">{dayRoundName} • {dayPicks.length}/{dayMax}</div>
+                    </button>
+                  )
+                })}
+              </div>
+
               {/* Enhanced Pick Header - Clear round/day and pick counter */}
               <div className="rounded-xl p-4" style={{ background: 'linear-gradient(135deg, rgba(0,255,163,0.08) 0%, rgba(0,255,163,0.02) 100%)', border: '1px solid rgba(0,255,163,0.2)' }}>
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="text-lg font-bold" style={{ color: '#00FFA3' }}>
-                      {ROUND_LABELS[activeRoundKey]} — Day {activeContestDay} Picks
+                      {ROUND_LABELS[activeRoundKey]} — Day {effectiveContestDay} Picks
                     </h2>
                     <p className="text-xs mt-1" style={{ color: '#A0A0B0' }}>
                       {maxPicksPerDay === 2 ? '2 picks available today' : '1 pick available today'}

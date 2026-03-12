@@ -230,6 +230,7 @@ export default function AdminBracketEditor({
   onConfirm,
   onLoadTeams,
   onGradeGame,
+  onLockGame,
   onSaveTestPreview
 }: AdminBracketEditorProps) {
   // Local state for editing
@@ -500,6 +501,8 @@ export default function AdminBracketEditor({
 
   // Handle locking/unlocking a game
   const handleLockGame = async (roundKey: string, matchupKey: string, currentlyLocked: boolean) => {
+    if (!onLockGame) return
+
     try {
       await onLockGame(roundKey, matchupKey, !currentlyLocked)
 

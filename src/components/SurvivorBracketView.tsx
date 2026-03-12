@@ -195,116 +195,155 @@ export function SurvivorBracketView({ bracketData, activeRound, userPicks, entry
       </button>
 
       {expanded && (
-        <div className="border-t p-3" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
-          {/* Traditional bracket layout: Left side | Final Four/Championship | Right side */}
-          <div className="flex items-start justify-between w-full">
-            {/* LEFT SIDE: East + West regions */}
-            <div className="flex gap-3 flex-1">
-              {/* East Region */}
-              <div className="space-y-2">
-                <div className="text-center text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: '#00FFA3' }}>East</div>
-                {regionalRounds.map((roundKey) => {
-                  const roundNum = ROUND_KEYS.indexOf(roundKey) + 1
-                  const style = getRoundStyle(roundNum)
-                  const matchups = getRegionMatchups(results, roundKey, 'East')
-                  return (
-                    <div key={`east-${roundKey}`} className="rounded-lg" style={{ transform: `scale(${style.scale})`, transformOrigin: 'top left', opacity: style.opacity }}>
-                      <div className="text-[8px] font-bold uppercase text-center mb-1" style={{ color: style.headerColor }}>{ROUND_LABELS[roundKey]}</div>
-                      <div className="space-y-1">
-                        {matchups.map(([key, matchup]) => (
-                          <MatchupCard key={key} matchup={matchup} roundKey={roundKey} matchupIndex={parseMatchupIndex(key)} userPicks={userPicks} roundNumber={roundNum} />
-                        ))}
+        <div className="border-t p-2" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+          {/* Compact March Madness Layout: Left | Center | Right */}
+          <div className="flex items-stretch justify-between w-full gap-1">
+            {/* LEFT SIDE: East + West regions - stacked horizontally */}
+            <div className="flex gap-1 flex-1 justify-center">
+              {/* East */}
+              <div className="flex flex-col">
+                <div className="text-center text-[9px] font-bold uppercase mb-1" style={{ color: '#00FFA3' }}>East</div>
+                <div className="flex gap-1">
+                  {['round64', 'round32', 'sweet16', 'elite8'].map((roundKey) => {
+                    const roundNum = ROUND_KEYS.indexOf(roundKey) + 1
+                    const isActive = activeRound === roundNum
+                    const matchups = getRegionMatchups(results, roundKey, 'East')
+                    return (
+                      <div key={`east-${roundKey}`} className="flex flex-col justify-center" style={{ opacity: isActive ? 1 : 0.5 }}>
+                        <div className="text-[7px] font-bold uppercase text-center mb-0.5" style={{ color: isActive ? '#00FFA3' : '#6B6B80' }}>{ROUND_LABELS[roundKey]}</div>
+                        <div className="space-y-0.5">
+                          {matchups.map(([key, matchup]) => (
+                            <CompactMatchupCard key={key} matchup={matchup} roundKey={roundKey} userPicks={userPicks} />
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )
-                })}
+                    )
+                  })}
+                </div>
               </div>
 
-              {/* West Region */}
-              <div className="space-y-2">
-                <div className="text-center text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: '#00FFA3' }}>West</div>
-                {regionalRounds.map((roundKey) => {
-                  const roundNum = ROUND_KEYS.indexOf(roundKey) + 1
-                  const style = getRoundStyle(roundNum)
-                  const matchups = getRegionMatchups(results, roundKey, 'West')
-                  return (
-                    <div key={`west-${roundKey}`} className="rounded-lg" style={{ transform: `scale(${style.scale})`, transformOrigin: 'top left', opacity: style.opacity }}>
-                      <div className="text-[8px] font-bold uppercase text-center mb-1" style={{ color: style.headerColor }}>{ROUND_LABELS[roundKey]}</div>
-                      <div className="space-y-1">
-                        {matchups.map(([key, matchup]) => (
-                          <MatchupCard key={key} matchup={matchup} roundKey={roundKey} matchupIndex={parseMatchupIndex(key)} userPicks={userPicks} roundNumber={roundNum} />
-                        ))}
+              {/* West */}
+              <div className="flex flex-col">
+                <div className="text-center text-[9px] font-bold uppercase mb-1" style={{ color: '#00FFA3' }}>West</div>
+                <div className="flex gap-1">
+                  {['round64', 'round32', 'sweet16', 'elite8'].map((roundKey) => {
+                    const roundNum = ROUND_KEYS.indexOf(roundKey) + 1
+                    const isActive = activeRound === roundNum
+                    const matchups = getRegionMatchups(results, roundKey, 'West')
+                    return (
+                      <div key={`west-${roundKey}`} className="flex flex-col justify-center" style={{ opacity: isActive ? 1 : 0.5 }}>
+                        <div className="text-[7px] font-bold uppercase text-center mb-0.5" style={{ color: isActive ? '#00FFA3' : '#6B6B80' }}>{ROUND_LABELS[roundKey]}</div>
+                        <div className="space-y-0.5">
+                          {matchups.map(([key, matchup]) => (
+                            <CompactMatchupCard key={key} matchup={matchup} roundKey={roundKey} userPicks={userPicks} />
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )
-                })}
+                    )
+                  })}
+                </div>
               </div>
             </div>
 
             {/* CENTER: Final Four + Championship */}
-            <div className="flex flex-col items-center justify-center gap-2 px-4">
-              {finalRounds.map((roundKey) => {
-                const roundNum = ROUND_KEYS.indexOf(roundKey) + 1
-                const style = getRoundStyle(roundNum)
-                const matchups = Object.entries(results[roundKey] ?? {}).sort((a, b) => parseMatchupIndex(a[0]) - parseMatchupIndex(b[0]))
-                return (
-                  <div key={roundKey} className="rounded-lg" style={{ transform: `scale(${style.scale})`, opacity: style.opacity }}>
-                    <div className="text-[10px] font-bold uppercase text-center mb-1" style={{ color: style.headerColor }}>{ROUND_LABELS[roundKey]}</div>
-                    <div className="space-y-1">
-                      {matchups.map(([key, matchup]) => (
-                        <MatchupCard key={key} matchup={matchup} roundKey={roundKey} matchupIndex={parseMatchupIndex(key)} userPicks={userPicks} roundNumber={roundNum} />
-                      ))}
-                    </div>
-                  </div>
-                )
-              })}
+            <div className="flex flex-col items-center justify-center gap-1 px-2">
+              <div className="text-[9px] font-bold uppercase mb-1" style={{ color: '#F59E0B' }}>Final Four</div>
+              <div className="space-y-0.5">
+                {(results['finalFour'] ? Object.entries(results['finalFour']) : []).sort((a, b) => parseMatchupIndex(a[0]) - parseMatchupIndex(b[0])).map(([key, matchup]) => (
+                  <CompactMatchupCard key={key} matchup={matchup} roundKey="finalFour" userPicks={userPicks} />
+                ))}
+              </div>
+              <div className="text-[9px] font-bold uppercase my-1" style={{ color: '#EF4444' }}>Championship</div>
+              <div className="space-y-0.5">
+                {(results['championship'] ? Object.entries(results['championship']) : []).sort((a, b) => parseMatchupIndex(a[0]) - parseMatchupIndex(b[0])).map(([key, matchup]) => (
+                  <CompactMatchupCard key={key} matchup={matchup} roundKey="championship" userPicks={userPicks} />
+                ))}
+              </div>
             </div>
 
-            {/* RIGHT SIDE: South + Midwest regions */}
-            <div className="flex gap-3 flex-1">
-              {/* South Region */}
-              <div className="space-y-2">
-                <div className="text-center text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: '#F59E0B' }}>South</div>
-                {regionalRounds.map((roundKey) => {
-                  const roundNum = ROUND_KEYS.indexOf(roundKey) + 1
-                  const style = getRoundStyle(roundNum)
-                  const matchups = getRegionMatchups(results, roundKey, 'South')
-                  return (
-                    <div key={`south-${roundKey}`} className="rounded-lg" style={{ transform: `scale(${style.scale})`, transformOrigin: 'top right', opacity: style.opacity }}>
-                      <div className="text-[8px] font-bold uppercase text-center mb-1" style={{ color: style.headerColor }}>{ROUND_LABELS[roundKey]}</div>
-                      <div className="space-y-1">
-                        {matchups.map(([key, matchup]) => (
-                          <MatchupCard key={key} matchup={matchup} roundKey={roundKey} matchupIndex={parseMatchupIndex(key)} userPicks={userPicks} roundNumber={roundNum} />
-                        ))}
+            {/* RIGHT SIDE: South + Midwest */}
+            <div className="flex gap-1 flex-1 justify-center">
+              {/* South */}
+              <div className="flex flex-col">
+                <div className="text-center text-[9px] font-bold uppercase mb-1" style={{ color: '#F59E0B' }}>South</div>
+                <div className="flex gap-1">
+                  {['round64', 'round32', 'sweet16', 'elite8'].map((roundKey) => {
+                    const roundNum = ROUND_KEYS.indexOf(roundKey) + 1
+                    const isActive = activeRound === roundNum
+                    const matchups = getRegionMatchups(results, roundKey, 'South')
+                    return (
+                      <div key={`south-${roundKey}`} className="flex flex-col justify-center" style={{ opacity: isActive ? 1 : 0.5 }}>
+                        <div className="text-[7px] font-bold uppercase text-center mb-0.5" style={{ color: isActive ? '#F59E0B' : '#6B6B80' }}>{ROUND_LABELS[roundKey]}</div>
+                        <div className="space-y-0.5">
+                          {matchups.map(([key, matchup]) => (
+                            <CompactMatchupCard key={key} matchup={matchup} roundKey={roundKey} userPicks={userPicks} />
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )
-                })}
+                    )
+                  })}
+                </div>
               </div>
 
-              {/* Midwest Region */}
-              <div className="space-y-2">
-                <div className="text-center text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: '#F59E0B' }}>Midwest</div>
-                {regionalRounds.map((roundKey) => {
-                  const roundNum = ROUND_KEYS.indexOf(roundKey) + 1
-                  const style = getRoundStyle(roundNum)
-                  const matchups = getRegionMatchups(results, roundKey, 'Midwest')
-                  return (
-                    <div key={`midwest-${roundKey}`} className="rounded-lg" style={{ transform: `scale(${style.scale})`, transformOrigin: 'top right', opacity: style.opacity }}>
-                      <div className="text-[8px] font-bold uppercase text-center mb-1" style={{ color: style.headerColor }}>{ROUND_LABELS[roundKey]}</div>
-                      <div className="space-y-1">
-                        {matchups.map(([key, matchup]) => (
-                          <MatchupCard key={key} matchup={matchup} roundKey={roundKey} matchupIndex={parseMatchupIndex(key)} userPicks={userPicks} roundNumber={roundNum} />
-                        ))}
+              {/* Midwest */}
+              <div className="flex flex-col">
+                <div className="text-center text-[9px] font-bold uppercase mb-1" style={{ color: '#F59E0B' }}>Midwest</div>
+                <div className="flex gap-1">
+                  {['round64', 'round32', 'sweet16', 'elite8'].map((roundKey) => {
+                    const roundNum = ROUND_KEYS.indexOf(roundKey) + 1
+                    const isActive = activeRound === roundNum
+                    const matchups = getRegionMatchups(results, roundKey, 'Midwest')
+                    return (
+                      <div key={`midwest-${roundKey}`} className="flex flex-col justify-center" style={{ opacity: isActive ? 1 : 0.5 }}>
+                        <div className="text-[7px] font-bold uppercase text-center mb-0.5" style={{ color: isActive ? '#F59E0B' : '#6B6B80' }}>{ROUND_LABELS[roundKey]}</div>
+                        <div className="space-y-0.5">
+                          {matchups.map(([key, matchup]) => (
+                            <CompactMatchupCard key={key} matchup={matchup} roundKey={roundKey} userPicks={userPicks} />
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )
-                })}
+                    )
+                  })}
+                </div>
               </div>
             </div>
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// Compact matchup card for the bracket view
+function CompactMatchupCard({ matchup, roundKey, userPicks }: { matchup: BracketMatchup; roundKey: string; userPicks?: UserPick[] }) {
+  const team1 = matchup.team1 || 'TBD'
+  const team2 = matchup.team2 || 'TBD'
+  const winner = matchup.winner
+
+  // Check if user picked either team
+  const userPick = userPicks?.find(p => p.team_name === team1 || p.team_name === team2)
+  const pickedTeam = userPick?.team_name
+
+  return (
+    <div
+      className="rounded px-1 py-0.5 text-[7px]"
+      style={{
+        background: winner ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.05)',
+        borderLeft: winner === team1 ? '2px solid #00FFA3' : winner === team2 ? '2px solid #F59E0B' : '1px solid rgba(255,255,255,0.06)',
+      }}
+    >
+      <div className="flex items-center justify-between">
+        <span className="truncate" style={{ color: winner === team1 ? '#00FFA3' : team1 === 'TBD' ? '#4A4A5A' : '#E6E6FA' }}>
+          {matchup.team1Seed ? `${matchup.team1Seed}. ` : ''}{team1}
+        </span>
+        {pickedTeam === team1 && <span className="text-[6px] text-yellow-400">P</span>}
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="truncate" style={{ color: winner === team2 ? '#00FFA3' : team2 === 'TBD' ? '#4A4A5A' : '#E6E6FA' }}>
+          {matchup.team2Seed ? `${matchup.team2Seed}. ` : ''}{team2}
+        </span>
+        {pickedTeam === team2 && <span className="text-[6px] text-yellow-400">P</span>}
+      </div>
     </div>
   )
 }

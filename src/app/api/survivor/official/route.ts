@@ -32,6 +32,7 @@ interface SurvivorPick {
   result: 'pending' | 'won' | 'eliminated'
   picked_at: string
   updated_at: string
+  contest_day: number | null
 }
 
 // ─── GET /api/survivor/official ───────────────────────────────────────────
@@ -79,7 +80,7 @@ export async function GET(_req: NextRequest) {
   if (entryIds.length > 0) {
     const { data: pickRows } = await supabaseAdmin
       .from('survivor_picks')
-      .select('id, official_entry_id, user_id, round_number, team_name, team_seed, opponent_name, result, picked_at, updated_at')
+      .select('id, official_entry_id, user_id, round_number, team_name, team_seed, opponent_name, result, picked_at, updated_at, contest_day')
       .in('official_entry_id', entryIds)
       .order('round_number', { ascending: true })
     picks = (pickRows ?? []) as SurvivorPick[]
@@ -91,7 +92,7 @@ export async function GET(_req: NextRequest) {
   if (testEntryIds.length > 0) {
     const { data: testPickRows } = await supabaseAdmin
       .from('survivor_picks')
-      .select('id, official_entry_id, user_id, round_number, team_name, team_seed, opponent_name, result, picked_at, updated_at')
+      .select('id, official_entry_id, user_id, round_number, team_name, team_seed, opponent_name, result, picked_at, updated_at, contest_day')
       .in('official_entry_id', testEntryIds)
       .order('round_number', { ascending: true })
     testPicks = (testPickRows ?? []) as SurvivorPick[]
